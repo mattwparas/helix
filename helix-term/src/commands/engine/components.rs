@@ -1,7 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{any::Any, collections::HashMap, fmt::Pointer, sync::Arc};
 
-use helix_core::Position;
+use helix_core::{text_annotations::InlineAnnotation, Position};
 use helix_view::{
+    document::{DocumentInlayHints, DocumentInlayHintsId},
     graphics::{Color, CursorKind, Rect, UnderlineStyle},
     input::{Event, KeyEvent, MouseButton, MouseEvent},
     keyboard::{KeyCode, KeyModifiers},
@@ -9,6 +10,7 @@ use helix_view::{
     Editor,
 };
 use steel::{
+    gc::unsafe_erased_pointers::ReferenceCustomType,
     rvals::{as_underlying_type, Custom, FromSteelVal, IntoSteelVal, SteelString},
     steel_vm::{builtin::BuiltInModule, engine::Engine, register_fn::RegisterFn},
     SteelVal,
@@ -423,6 +425,76 @@ pub fn helix_component_module() -> BuiltInModule {
                 false.into_steelval()
             }
         })
+        .register_fn(
+            "add-inlay-hint",
+            |cx: &mut Context, char_index: usize, completion: SteelString| {
+                let view_id = cx.editor.tree.focus;
+                if !cx.editor.tree.contains(view_id) {
+                    return false.into_steelval();
+                }
+                let view = cx.editor.tree.get(view_id);
+                let doc_id = cx.editor.tree.get(view_id).doc;
+                let doc = match cx.editor.documents.get_mut(&doc_id) {
+                    Some(x) => x,
+                    None => return false.into_steelval(),
+                };
+                let mut new_inlay_hints = doc
+                    .inlay_hints(view_id)
+                    .map(|x| x.clone())
+                    .unwrap_or_else(|| {
+                        let doc_text = doc.text();
+                        let len_lines = doc_text.len_lines();
+
+                        let view_height = view.inner_height();
+                        let first_visible_line = doc_text.char_to_line(
+                            doc.view_offset(view_id).anchor.min(doc_text.len_chars()),
+                        );
+                        let first_line = first_visible_line.saturating_sub(view_height);
+                        let last_line = first_visible_line
+                            .saturating_add(view_height.saturating_mul(2))
+                            .min(len_lines);
+
+                        let new_doc_inlay_hints_id = DocumentInlayHintsId {
+                            first_line,
+                            last_line,
+                        };
+
+                        DocumentInlayHints::empty_with_id(new_doc_inlay_hints_id)
+                    });
+                new_inlay_hints
+                    .other_inlay_hints
+                    .push(InlineAnnotation::new(char_index, completion.to_string()));
+
+                doc.set_inlay_hints(view_id, new_inlay_hints);
+                true.into_steelval()
+            },
+        )
+        .register_fn(
+            "remove-inlay-hint",
+            |cx: &mut Context, char_index: usize, completion: SteelString| {
+                let text = completion.to_string();
+                let view_id = cx.editor.tree.focus;
+                if !cx.editor.tree.contains(view_id) {
+                    return false.into_steelval();
+                }
+                let doc_id = cx.editor.tree.get_mut(view_id).doc;
+                let doc = match cx.editor.documents.get_mut(&doc_id) {
+                    Some(x) => x,
+                    None => return false.into_steelval(),
+                };
+
+                let inlay_hints = match doc.inlay_hints(view_id) {
+                    Some(inlay_hints) => inlay_hints,
+                    None => return false.into_steelval(),
+                };
+                let mut new_inlay_hints = inlay_hints.clone();
+                new_inlay_hints
+                    .other_inlay_hints
+                    .retain(|x| x.char_idx != char_index && x.text != text);
+                doc.set_inlay_hints(view_id, new_inlay_hints);
+                true.into_steelval()
+            },
+        )
         // Is this mouse event within the area provided
         .register_fn("mouse-event-within-area?", |event: Event, area: Rect| {
             if let Event::Mouse(MouseEvent { row, column, .. }) = event {
