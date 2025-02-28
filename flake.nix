@@ -75,11 +75,13 @@
         cargoArtifacts = craneLibStable.buildDepsOnly commonArgs;
 
         buildPhase = ''
+          runHook preBuild
           export HOME=$PWD/build_home  # code-gen will write files relative to $HOME
           export STEEL_LSP_HOME=$PWD/lsp_home  # required to generate primitives for language server
           mkdir -p $STEEL_LSP_HOME
           cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
           cargo run --package xtask -- code-gen --message-format json-render-diagnostics >"$cargoBuildLog"
+          runHook postBuild
         '';
 
         postInstall = ''
