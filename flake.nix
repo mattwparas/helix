@@ -75,16 +75,20 @@
         cargoArtifacts = craneLibStable.buildDepsOnly commonArgs;
 
         buildPhase = ''
+          runHook preBuild
           export HOME=$PWD/build_home  # code-gen will write files relative to $HOME
+          export STEEL_LSP_HOME=$PWD/lsp_home  # required to generate primitives for language server
+          mkdir -p $STEEL_LSP_HOME
           cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
           cargo run --package xtask -- code-gen --message-format json-render-diagnostics >"$cargoBuildLog"
+          runHook postBuild
         '';
 
         postInstall = ''
-          mkdir -p $out/cogs
+          mkdir -p $out/cogs $out/steel-language-server
           cp -r build_home/.config/helix/* "$out/cogs"
+          cp -r lsp_home/* "$out/steel-language-server"
         '';
-
       });
 
       makeOverridableHelix = old: config: let
@@ -161,7 +165,7 @@
             HELIX_NIX_BUILD_REV = self.rev or self.dirtyRev or null;
           });
         helix = makeOverridableHelix self.packages.${system}.helix-unwrapped {};
-        helix-cogs = helix-cogs;
+        inherit helix-cogs;
         default = self.packages.${system}.helix;
       };
 
