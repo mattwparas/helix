@@ -1,7 +1,11 @@
-use crate::DocumentId;
+use crate::{DocumentId, ViewId};
 
 pub fn document_id_to_usize(doc_id: &DocumentId) -> usize {
     doc_id.0.into()
+}
+
+pub fn view_id_to_u64(view_id: &ViewId) -> u64 {
+    view_id.0.as_ffi()
 }
 
 #[cfg(feature = "steel")]

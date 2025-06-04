@@ -23,6 +23,7 @@ use helix_view::{
     },
     events::{DocumentDidOpen, DocumentFocusLost, DocumentSaved, SelectionDidChange},
     extension::document_id_to_usize,
+    extension::view_id_to_u64,
     graphics::CursorKind,
     input::KeyEvent,
     theme::Color,
@@ -4004,6 +4005,7 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
     });
 
     engine.register_fn("doc-id->usize", document_id_to_usize);
+    engine.register_fn("view-id->u64", view_id_to_u64);
 
     // TODO: Remove that this is now in helix/core/misc
     engine.register_fn("acquire-context-lock", acquire_context_lock);
