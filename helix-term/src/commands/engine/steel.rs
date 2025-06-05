@@ -3233,6 +3233,7 @@ fn configure_lsp_globals() {
             "helix-find-workspace",
             "find-workspace",
             "doc-id->usize",
+            "view-id->u64",
             "new-component!",
             "acquire-context-lock",
             "SteelDynamicComponent?",
