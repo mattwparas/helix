@@ -3222,6 +3222,7 @@ fn configure_lsp_globals() {
     path.push("_helix-global-builtins.scm");
 
     let mut output = String::new();
+
     let names = &[
         "*helix.cx*",
         "*helix.config*",
@@ -3232,7 +3233,6 @@ fn configure_lsp_globals() {
         "helix-find-workspace",
         "find-workspace",
         "doc-id->usize",
-        "view-id->u64",
         "new-component!",
         "acquire-context-lock",
         "SteelDynamicComponent?",
