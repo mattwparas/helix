@@ -3597,6 +3597,12 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         }};
     }
 
+    register_1!(
+        "make-position-params",
+        make_position_params,
+        "create a hashmap of an lsp TextDocumentPositionParams"
+    );
+
     // TODO: Get rid of the `hx.` prefix
     register_1!(
         "hx.custom-insert-newline",
@@ -5060,6 +5066,45 @@ fn move_window_to_the_right(cx: &mut Context) {
         .swap_split_in_direction(helix_view::tree::Direction::Right)
         .is_some()
     {}
+}
+
+fn make_position_params(cx: &mut Context, encoding: SteelString) -> anyhow::Result<SteelVal> {
+    let encoding = match &***encoding {
+        "utf-8" => helix_lsp::OffsetEncoding::Utf8,
+        "utf-16" => helix_lsp::OffsetEncoding::Utf16,
+        "utf-32" => helix_lsp::OffsetEncoding::Utf32,
+        _ => anyhow::bail!("invalid encoding {:?}", &***encoding),
+    };
+
+    let mut text_document = steel::HashMap::new();
+    let (view, doc) = current!(cx.editor);
+    text_document.insert(
+        SteelVal::StringV("uri".into()),
+        SteelVal::StringV(doc.uri().unwrap().to_url().unwrap().to_string().into()),
+    );
+
+    let pos = doc.position(view.id, encoding);
+    let mut position = steel::HashMap::<SteelVal, SteelVal>::new();
+    position.insert(
+        SteelVal::StringV("line".into()),
+        SteelVal::IntV(pos.line as isize),
+    );
+    position.insert(
+        SteelVal::StringV("character".into()),
+        SteelVal::IntV(pos.character as isize),
+    );
+
+    let mut map = steel::HashMap::<SteelVal, SteelVal>::new();
+    map.insert(
+        SteelVal::StringV("textDocument".into()),
+        SteelVal::HashMapV(steel::gc::Gc::new(text_document).into()),
+    );
+    map.insert(
+        SteelVal::StringV("position".into()),
+        SteelVal::HashMapV(steel::gc::Gc::new(position).into()),
+    );
+
+    Ok(SteelVal::HashMapV(steel::gc::Gc::new(map).into()))
 }
 
 fn send_arbitrary_lsp_command(
