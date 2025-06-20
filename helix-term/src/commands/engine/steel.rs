@@ -11,7 +11,7 @@ use helix_core::{
     },
     syntax::{self},
     text_annotations::InlineAnnotation,
-    Range, Selection, Tendril,
+    Range, Rope, Selection, Tendril,
 };
 use helix_event::register_hook;
 use helix_view::{
@@ -27,7 +27,7 @@ use helix_view::{
     graphics::CursorKind,
     input::KeyEvent,
     theme::Color,
-    DocumentId, Editor, Theme, ViewId,
+    Document, DocumentId, Editor, Theme, ViewId,
 };
 use once_cell::sync::{Lazy, OnceCell};
 use steel::{
@@ -60,9 +60,9 @@ use crate::{
     compositor::{self, Component, Compositor},
     config::Config,
     events::{OnModeSwitch, PostCommand, PostInsertChar},
-    job::{self, Callback},
+    job::{self, Callback, ThreadLocalEditorCompositorCallback},
     keymap::{self, merge_keys, KeyTrie, KeymapResult},
-    ui::{self, picker::PathOrId, PickerColumn, Popup, Prompt, PromptEvent},
+    ui::{self, picker::PathOrId, PickerColumn, Popup, Prompt, PromptEvent, Text},
 };
 
 use components::SteelDynamicComponent;
@@ -342,6 +342,32 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         }
     }
 
+    let mut template_function_arity_2 = |name: &str, doc: &str| {
+        if generate_sources {
+            let docstring = format_docstring(doc);
+
+            builtin_static_command_module.push_str(&format!(
+                r#"
+(provide {})
+;;@doc
+{}
+(define ({} arg0 arg1)
+    (helix.static.{} *helix.cx* arg0 arg1))
+"#,
+                name, docstring, name, name
+            ));
+        }
+    };
+
+    macro_rules! function2 {
+        ($name:expr, $function:expr, $doc:expr) => {{
+            module.register_fn($name, $function);
+            template_function_arity_2($name, $doc);
+        }};
+    }
+
+    function2!("open-view!", open_view, "open a new window");
+
     let mut template_function_arity_1 = |name: &str, doc: &str| {
         if generate_sources {
             let docstring = format_docstring(doc);
@@ -409,6 +435,8 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         "Enqueue an expression to run at the top level context, 
         after the existing function context has exited."
     );
+
+    function1!("open-popup!", open_popup, "open a popup etc");
 
     let mut template_function_arity_0 = |name: &str, doc: &str| {
         if generate_sources {
@@ -4453,6 +4481,54 @@ pub fn run_expression_in_engine(cx: &mut Context, text: String) -> anyhow::Resul
                     }
                     Err(e) => enter_engine(|x| present_error_inside_engine_context(&mut ctx, x, e)),
                 }
+            },
+        );
+        Ok(call)
+    };
+    cx.jobs.local_callback(callback);
+
+    Ok(())
+}
+
+pub fn open_view(
+    cx: &mut Context,
+    value: SteelString,
+    lang: Option<SteelString>,
+) -> anyhow::Result<()> {
+    let callback = async move {
+        let call: ThreadLocalEditorCompositorCallback = Box::<_>::new(
+            move |editor: &mut Editor, _compositor: &mut Compositor, _jobs: &mut job::Jobs| {
+                let id = editor.new_file_from_document(
+                    Action::VerticalSplit,
+                    Document::from(
+                        Rope::from(&***value),
+                        None,
+                        std::sync::Arc::clone(&editor.config),
+                        editor.syn_loader.clone(),
+                    ),
+                );
+
+                if let Some(lang) = lang {
+                    let doc = doc_mut!(editor, &id);
+                    let _ = doc.set_language_by_language_id(&lang, &editor.syn_loader.load());
+                }
+            },
+        );
+        Ok(call)
+    };
+    cx.jobs.local_callback(callback);
+
+    Ok(())
+}
+
+pub fn open_popup(cx: &mut Context, value: SteelString) -> anyhow::Result<()> {
+    let callback = async move {
+        let call: ThreadLocalEditorCompositorCallback = Box::new(
+            move |editor: &mut Editor, compositor: &mut Compositor, _jobs: &mut job::Jobs| {
+                let popup = Popup::new("engine", Text::new((**value).clone())).position(Some(
+                    helix_core::Position::new(editor.cursor().0.unwrap_or_default().row, 2),
+                ));
+                compositor.replace_or_push("engine", popup);
             },
         );
         Ok(call)
