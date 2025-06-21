@@ -394,6 +394,11 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         set_selection_primary_index,
         "Set the primary index of the current selection"
     );
+    function1!(
+        "remove-current-selection-range!",
+        remove_selection_range,
+        "Remove a range from the current selection"
+    );
 
     function1!(
         "regex-selection",
@@ -4411,6 +4416,12 @@ fn set_selection_primary_index(cx: &mut Context, primary_index: usize) {
     let mut selection = doc.selection(view.id).clone();
     selection.set_primary_index(primary_index);
     doc.set_selection(view.id, selection)
+}
+
+fn remove_selection_range(cx: &mut Context, index: usize) {
+    let (view, doc) = current!(cx.editor);
+    let selection = doc.selection(view.id).clone();
+    doc.set_selection(view.id, selection.remove(index))
 }
 
 fn current_line_number(cx: &mut Context) -> usize {
