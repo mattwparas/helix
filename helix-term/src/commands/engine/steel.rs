@@ -2007,7 +2007,16 @@ impl super::PluginSystem for SteelScriptingEngine {
                                 })
                         }) {
                             Ok(res) => {
-                                cx.editor.set_status(res.to_string());
+                                match &res {
+                                    SteelVal::Void => {}
+                                    SteelVal::StringV(s) => {
+                                        cx.editor.set_status(s.as_str().to_owned());
+                                    }
+                                    _ => {
+                                        cx.editor.set_status(res.to_string());
+                                    }
+                                }
+
                                 Ok(res)
                             }
                             Err(e) => Err(e),
@@ -3675,10 +3684,23 @@ callback : (-> any?)
 ```
         "#
     );
+
     register_1!(
         "set-status!",
         set_status,
-        "Sets the content of the status line"
+        "Sets the content of the status line, with the info severity"
+    );
+
+    register_1!(
+        "set-warning!",
+        set_warning,
+        "Sets the content of the status line, with the warning severity"
+    );
+
+    register_1!(
+        "set-error!",
+        set_error,
+        "Sets the content of the status line, with the error severity"
     );
 
     module.register_fn("send-lsp-command", send_arbitrary_lsp_command);
@@ -4168,7 +4190,13 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
 
     // Hooks
     engine.register_fn("register-hook!", register_hook);
-    engine.register_fn("log::info!", |message: String| log::info!("{}", message));
+    engine.register_fn("log::info!", |message: SteelVal| {
+        if let SteelVal::StringV(s) = &message {
+            log::info!("{}", s)
+        } else {
+            log::info!("{}", message)
+        }
+    });
 
     engine.register_fn("fuzzy-match", |pattern: SteelString, items: SteelVal| {
         if let SteelVal::ListV(l) = items {
@@ -4719,7 +4747,24 @@ fn pop_last_component_by_name(cx: &mut Context, name: SteelString) {
 }
 
 fn set_status(cx: &mut Context, value: SteelVal) {
-    cx.editor.set_status(value.to_string())
+    match value {
+        SteelVal::StringV(s) => cx.editor.set_status(s.as_ref().to_owned()),
+        _ => cx.editor.set_status(value.to_string()),
+    }
+}
+
+fn set_warning(cx: &mut Context, value: SteelVal) {
+    match value {
+        SteelVal::StringV(s) => cx.editor.set_warning(s.as_ref().to_owned()),
+        _ => cx.editor.set_warning(value.to_string()),
+    }
+}
+
+fn set_error(cx: &mut Context, value: SteelVal) {
+    match value {
+        SteelVal::StringV(s) => cx.editor.set_error(s.as_ref().to_owned()),
+        _ => cx.editor.set_error(value.to_string()),
+    }
 }
 
 fn enqueue_command(cx: &mut Context, callback_fn: SteelVal) {
