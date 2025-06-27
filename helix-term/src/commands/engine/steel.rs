@@ -3884,6 +3884,18 @@ last-line : int?
 "#
     );
 
+    register_2!(
+        "find-split-in-direction",
+        cx_find_split_in_direction,
+        r#"
+Find split in a direction relative to the provided view-id.
+
+```scheme
+(find-split-in-direction view-id direction) -> ViewId?
+```
+        "#
+    );
+
     if generate_sources {
         if let Some(mut target_directory) = alternative_runtime_search_path() {
             if !target_directory.exists() {
@@ -4397,6 +4409,8 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
     // Create directory since we can't do that in the current state
     engine.register_fn("hx.create-directory", create_directory);
 
+    engine.register_fn("hx.tree-direction-from-string", get_tree_direction_from_string);
+
     GLOBAL_OFFSET.set(engine.globals().len()).unwrap();
 
     engine
@@ -4621,6 +4635,24 @@ fn set_buffer_uri(cx: &mut Context, uri: SteelString) -> anyhow::Result<()> {
 
 fn cx_current_focus(cx: &mut Context) -> helix_view::ViewId {
     cx.editor.tree.focus
+}
+
+fn cx_find_split_in_direction(
+    cx: &mut Context,
+    view_id: ViewId,
+    direction: helix_view::tree::Direction,
+) -> Option<helix_view::ViewId> {
+    cx.editor.tree.find_split_in_direction(view_id, direction)
+}
+
+fn get_tree_direction_from_string(name: String) -> Option<helix_view::tree::Direction> {
+    match name.as_str() {
+        "up" => Some(helix_view::tree::Direction::Up),
+        "down" => Some(helix_view::tree::Direction::Down),
+        "left" => Some(helix_view::tree::Direction::Left),
+        "right" => Some(helix_view::tree::Direction::Right),
+        _ => None,
+    }
 }
 
 fn cx_get_document_id(cx: &mut Context, view_id: helix_view::ViewId) -> DocumentId {
