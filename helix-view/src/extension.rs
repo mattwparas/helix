@@ -13,15 +13,11 @@ mod steel_implementations {
     };
 
     use crate::{
-        document::Mode,
-        editor::{
+        document::Mode, editor::{
             Action, AutoSave, BufferLine, CursorShapeConfig, FilePickerConfig, GutterConfig,
             IndentGuidesConfig, LineEndingConfig, LineNumber, LspConfig, SearchConfig,
             SmartTabConfig, StatusLineConfig, TerminalConfig, WhitespaceConfig,
-        },
-        graphics::{Color, Rect, Style, UnderlineStyle},
-        input::Event,
-        Document, DocumentId, Editor, ViewId,
+        }, graphics::{Color, Rect, Style, UnderlineStyle}, input::Event, tree::Direction, Document, DocumentId, Editor, ViewId
     };
 
     impl steel::gc::unsafe_erased_pointers::CustomReference for Editor {}
@@ -104,4 +100,5 @@ mod steel_implementations {
     impl Custom for LineEndingConfig {}
     impl Custom for SmartTabConfig {}
     impl Custom for AutoSave {}
+    impl Custom for Direction {}
 }
