@@ -2,6 +2,7 @@ use arc_swap::{access::Map, ArcSwap};
 use futures_util::Stream;
 use helix_core::{diagnostic::Severity, pos_at_coords, syntax, Range, Selection};
 use helix_lsp::{
+    jsonrpc,
     lsp::{self, notification::Notification},
     util::lsp_range_to_range,
     LanguageServerId, LspProgressMap,
@@ -17,6 +18,7 @@ use helix_view::{
     Align, Editor,
 };
 use serde_json::json;
+use steel::SteelVal;
 use tui::backend::Backend;
 
 use crate::{
@@ -903,8 +905,12 @@ impl Application {
                             jobs: &mut self.jobs,
                         };
 
-                        ScriptingEngine::handle_lsp_notification(
-                            &mut cx, server_id, event_name, params,
+                        ScriptingEngine::handle_lsp_call(
+                            &mut cx,
+                            server_id,
+                            event_name,
+                            jsonrpc::Id::Null,
+                            params,
                         );
                     }
                 }
@@ -918,11 +924,11 @@ impl Application {
                             "Language Server: Method {} not found in request {}",
                             method, id
                         );
-                        Err(helix_lsp::jsonrpc::Error {
+                        Some(Err(helix_lsp::jsonrpc::Error {
                             code: helix_lsp::jsonrpc::ErrorCode::MethodNotFound,
                             message: format!("Method not found: {}", method),
                             data: None,
-                        })
+                        }))
                     }
                     Err(err) => {
                         log::error!(
@@ -931,11 +937,11 @@ impl Application {
                             id,
                             err
                         );
-                        Err(helix_lsp::jsonrpc::Error {
+                        Some(Err(helix_lsp::jsonrpc::Error {
                             code: helix_lsp::jsonrpc::ErrorCode::ParseError,
                             message: format!("Malformed method call: {}", method),
                             data: None,
-                        })
+                        }))
                     }
                     Ok(MethodCall::WorkDoneProgressCreate(params)) => {
                         self.lsp_progress.create(server_id, params.token);
@@ -949,7 +955,7 @@ impl Application {
                             spinner.start();
                         }
 
-                        Ok(serde_json::Value::Null)
+                        Some(Ok(serde_json::Value::Null))
                     }
                     Ok(MethodCall::ApplyWorkspaceEdit(params)) => {
                         let language_server = language_server!();
@@ -959,25 +965,25 @@ impl Application {
                                 .editor
                                 .apply_workspace_edit(offset_encoding, &params.edit);
 
-                            Ok(json!(lsp::ApplyWorkspaceEditResponse {
+                            Some(Ok(json!(lsp::ApplyWorkspaceEditResponse {
                                 applied: res.is_ok(),
                                 failure_reason: res.as_ref().err().map(|err| err.kind.to_string()),
                                 failed_change: res
                                     .as_ref()
                                     .err()
                                     .map(|err| err.failed_change_idx as u32),
-                            }))
+                            })))
                         } else {
-                            Err(helix_lsp::jsonrpc::Error {
+                            Some(Err(helix_lsp::jsonrpc::Error {
                                 code: helix_lsp::jsonrpc::ErrorCode::InvalidRequest,
                                 message: "Server must be initialized to request workspace edits"
                                     .to_string(),
                                 data: None,
-                            })
+                            }))
                         }
                     }
                     Ok(MethodCall::WorkspaceFolders) => {
-                        Ok(json!(&*language_server!().workspace_folders().await))
+                        Some(Ok(json!(&*language_server!().workspace_folders().await)))
                     }
                     Ok(MethodCall::WorkspaceConfiguration(params)) => {
                         let language_server = language_server!();
@@ -997,7 +1003,7 @@ impl Application {
                                 Some(config)
                             })
                             .collect();
-                        Ok(json!(result))
+                        Some(Ok(json!(result)))
                     }
                     Ok(MethodCall::RegisterCapability(params)) => {
                         if let Some(client) = self.editor.language_servers.get_by_id(server_id) {
@@ -1035,7 +1041,7 @@ impl Application {
                             }
                         }
 
-                        Ok(serde_json::Value::Null)
+                        Some(Ok(serde_json::Value::Null))
                     }
                     Ok(MethodCall::UnregisterCapability(params)) => {
                         for unreg in params.unregisterations {
@@ -1051,23 +1057,57 @@ impl Application {
                                 }
                             }
                         }
-                        Ok(serde_json::Value::Null)
+                        Some(Ok(serde_json::Value::Null))
                     }
                     Ok(MethodCall::ShowDocument(params)) => {
                         let language_server = language_server!();
                         let offset_encoding = language_server.offset_encoding();
 
                         let result = self.handle_show_document(params, offset_encoding);
-                        Ok(json!(result))
+                        Some(Ok(json!(result)))
+                    }
+                    Ok(MethodCall::Other(event_name, params)) => {
+                        let server_id = server_id;
+
+                        let mut cx = crate::compositor::Context {
+                            editor: &mut self.editor,
+                            scroll: None,
+                            jobs: &mut self.jobs,
+                        };
+
+                        let result = ScriptingEngine::handle_lsp_call(
+                            &mut cx,
+                            server_id,
+                            event_name,
+                            id.clone(),
+                            params,
+                        );
+                        match result {
+                            Some(SteelVal::Void) => None,
+                            Some(value) => {
+                                let serde_value: Result<serde_json::Value, steel::SteelErr> =
+                                    value.try_into();
+                                match serde_value {
+                                    Ok(serialized_value) => Some(Ok(serialized_value)),
+                                    Err(error) => {
+                                        log::warn!("Failed to serialize a SteelVal: {}", error);
+                                        None
+                                    }
+                                }
+                            }
+                            _ => None,
+                        }
                     }
                 };
 
-                let language_server = language_server!();
-                if let Err(err) = language_server.reply(id.clone(), reply) {
-                    log::error!(
-                        "Failed to send reply to server '{}' request {id}: {err}",
-                        language_server.name()
-                    );
+                if let Some(reply) = reply {
+                    let language_server = language_server!();
+                    if let Err(err) = language_server.reply(id.clone(), reply) {
+                        log::error!(
+                            "Failed to send reply to server '{}' request {id}: {err}",
+                            language_server.name()
+                        );
+                    }
                 }
             }
             Call::Invalid { id } => log::error!("LSP invalid method call id={:?}", id),
