@@ -196,13 +196,22 @@ static BUFFER_EXTENSION_KEYMAP: Lazy<RwLock<BufferExtensionKeyMap>> = Lazy::new(
     })
 });
 
-pub static LSP_NOTIFICATION_REGISTRY: Lazy<RwLock<HashMap<(String, String), RootedSteelVal>>> =
+pub static LSP_CALL_REGISTRY: Lazy<RwLock<HashMap<(String, String), RootedSteelVal>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+
+fn register_lsp_call_callback(lsp: String, kind: String, function: SteelVal) {
+    let rooted = function.as_rooted();
+
+    LSP_CALL_REGISTRY
+        .write()
+        .unwrap()
+        .insert((lsp, kind), rooted);
+}
 
 fn register_lsp_notification_callback(lsp: String, kind: String, function: SteelVal) {
     let rooted = function.as_rooted();
 
-    LSP_NOTIFICATION_REGISTRY
+    LSP_CALL_REGISTRY
         .write()
         .unwrap()
         .insert((lsp, kind), rooted);
@@ -759,6 +768,8 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         register_lsp_notification_callback,
     );
 
+    module.register_fn("register-lsp-call-handler", register_lsp_call_callback);
+
     module.register_fn("update-configuration!", |ctx: &mut Context| {
         ctx.editor
             .config_events
@@ -956,6 +967,28 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
 ;;                                    (lambda (args) (displayln args)))
 ;; ```
 (define register-lsp-notification-handler helix.register-lsp-notification-handler)
+
+(provide register-lsp-call-handler)
+
+;;@doc
+;; Register a callback to be called on LSP calls sent from the server -> client
+;; that aren't currently handled by Helix as a built in.
+;;
+;; ```scheme
+;; (register-lsp-call-handler lsp-name event-name handler)
+;; ```
+;;
+;; * lsp-name : string?
+;; * event-name : string?
+;; * function : (-> hash? any?) ;; Function where the first argument is the parameters
+;;
+;; # Examples
+;; ```
+;; (register-lsp-call-handler "dart"
+;;                                    "dart/textDocument/publishClosingLabels"
+;;                                    (lambda (args) (displayln args)))
+;; ```
+(define register-lsp-call-handler helix.register-lsp-call-handler)
 
 (provide set-option!)
 (define (set-option! key value)
@@ -2114,14 +2147,14 @@ impl super::PluginSystem for SteelScriptingEngine {
 
     // TODO: Should this just be a hook / event instead of a function like this?
     // Handle an LSP notification, assuming its been sent through
-    fn handle_lsp_notification(
+    fn handle_lsp_call(
         &self,
         cx: &mut compositor::Context,
         server_id: helix_lsp::LanguageServerId,
         event_name: String,
         params: helix_lsp::jsonrpc::Params,
-    ) -> bool {
-        if let Err(e) = enter_engine(|guard| {
+    ) -> Option<SteelVal> {
+        let result = enter_engine(|guard| {
             {
                 let mut ctx = Context {
                     register: None,
@@ -2144,7 +2177,7 @@ impl super::PluginSystem for SteelScriptingEngine {
 
                 let language_server_name = language_server_name.unwrap();
 
-                let function = LSP_NOTIFICATION_REGISTRY
+                let function = LSP_CALL_REGISTRY
                     .read()
                     .unwrap()
                     .get(&(language_server_name, event_name))
@@ -2174,10 +2207,15 @@ impl super::PluginSystem for SteelScriptingEngine {
                     Ok(SteelVal::Void)
                 }
             }
-        }) {
-            cx.editor.set_error(format!("{}", e));
+        });
+
+        match result {
+            Err(e) => {
+                cx.editor.set_error(format!("{}", e));
+                Some(SteelVal::Void)
+            }
+            Ok(value) => Some(value),
         }
-        true
     }
 }
 
