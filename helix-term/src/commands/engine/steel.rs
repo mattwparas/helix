@@ -551,6 +551,18 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         "Convert a range into a selection"
     );
 
+    no_context!(
+        "tree-direction",
+        |direction: String| match direction.as_str() {
+            "up" => Ok(helix_view::tree::Direction::Up),
+            "down" => Ok(helix_view::tree::Direction::Down),
+            "left" => Ok(helix_view::tree::Direction::Left),
+            "right" => Ok(helix_view::tree::Direction::Right),
+            _ => Err(anyhow::anyhow!("Unknown tree direction `{}`", direction)),
+        },
+        "Convert a direction string (up, down, left, right) into a tree direction"
+    );
+
     module.register_fn("get-helix-scm-path", get_helix_scm_path);
     module.register_fn("get-init-scm-path", get_init_scm_path);
 
@@ -4409,8 +4421,6 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
     // Create directory since we can't do that in the current state
     engine.register_fn("hx.create-directory", create_directory);
 
-    engine.register_fn("hx.tree-direction-from-string", get_tree_direction_from_string);
-
     GLOBAL_OFFSET.set(engine.globals().len()).unwrap();
 
     engine
@@ -4643,16 +4653,6 @@ fn cx_find_split_in_direction(
     direction: helix_view::tree::Direction,
 ) -> Option<helix_view::ViewId> {
     cx.editor.tree.find_split_in_direction(view_id, direction)
-}
-
-fn get_tree_direction_from_string(name: String) -> Option<helix_view::tree::Direction> {
-    match name.as_str() {
-        "up" => Some(helix_view::tree::Direction::Up),
-        "down" => Some(helix_view::tree::Direction::Down),
-        "left" => Some(helix_view::tree::Direction::Left),
-        "right" => Some(helix_view::tree::Direction::Right),
-        _ => None,
-    }
 }
 
 fn cx_get_document_id(cx: &mut Context, view_id: helix_view::ViewId) -> DocumentId {
