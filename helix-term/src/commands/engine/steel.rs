@@ -551,6 +551,18 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         "Convert a range into a selection"
     );
 
+    no_context!(
+        "tree-direction",
+        |direction: String| match direction.as_str() {
+            "up" => Ok(helix_view::tree::Direction::Up),
+            "down" => Ok(helix_view::tree::Direction::Down),
+            "left" => Ok(helix_view::tree::Direction::Left),
+            "right" => Ok(helix_view::tree::Direction::Right),
+            _ => Err(anyhow::anyhow!("Unknown tree direction `{}`", direction)),
+        },
+        "Convert a direction string (up, down, left, right) into a tree direction"
+    );
+
     module.register_fn("get-helix-scm-path", get_helix_scm_path);
     module.register_fn("get-init-scm-path", get_init_scm_path);
 
@@ -3884,6 +3896,18 @@ last-line : int?
 "#
     );
 
+    register_2!(
+        "find-split-in-direction",
+        cx_find_split_in_direction,
+        r#"
+Find split in a direction relative to the provided view-id.
+
+```scheme
+(find-split-in-direction view-id direction) -> ViewId?
+```
+        "#
+    );
+
     if generate_sources {
         if let Some(mut target_directory) = alternative_runtime_search_path() {
             if !target_directory.exists() {
@@ -4621,6 +4645,14 @@ fn set_buffer_uri(cx: &mut Context, uri: SteelString) -> anyhow::Result<()> {
 
 fn cx_current_focus(cx: &mut Context) -> helix_view::ViewId {
     cx.editor.tree.focus
+}
+
+fn cx_find_split_in_direction(
+    cx: &mut Context,
+    view_id: ViewId,
+    direction: helix_view::tree::Direction,
+) -> Option<helix_view::ViewId> {
+    cx.editor.tree.find_split_in_direction(view_id, direction)
 }
 
 fn cx_get_document_id(cx: &mut Context, view_id: helix_view::ViewId) -> DocumentId {
