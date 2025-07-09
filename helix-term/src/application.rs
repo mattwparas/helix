@@ -891,9 +891,7 @@ impl Application {
                             jobs: &mut self.jobs,
                         };
 
-                        ScriptingEngine::handle_lsp_notification(
-                            &mut cx, server_id, event_name, params,
-                        );
+                        ScriptingEngine::handle_lsp_call(&mut cx, server_id, event_name, params);
                     }
                 }
             }
@@ -1047,6 +1045,33 @@ impl Application {
 
                         let result = self.handle_show_document(params, offset_encoding);
                         Ok(json!(result))
+                    }
+                    Ok(MethodCall::Other(event_name, params)) => {
+                        let server_id = server_id;
+
+                        let mut cx = crate::compositor::Context {
+                            editor: &mut self.editor,
+                            scroll: None,
+                            jobs: &mut self.jobs,
+                        };
+
+                        let result = ScriptingEngine::handle_lsp_call(
+                            &mut cx, server_id, event_name, params,
+                        );
+                        match result {
+                            Some(value) => {
+                                let serde_value: Result<serde_json::Value, steel::SteelErr> =
+                                    value.try_into();
+                                match serde_value {
+                                    Ok(serialized_value) => Ok(serialized_value),
+                                    Err(error) => {
+                                        log::warn!("Failed to serialize a SteelVal: {}", error);
+                                        Ok(serde_json::Value::Null)
+                                    }
+                                }
+                            }
+                            _ => Ok(serde_json::Value::Null),
+                        }
                     }
                 };
 
