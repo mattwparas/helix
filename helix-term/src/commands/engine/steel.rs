@@ -3593,6 +3593,8 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
     // Arity 0
     module.register_fn("hx.cx->pos", cx_pos_within_text);
     module.register_fn("cursor-position", cx_pos_within_text);
+    module.register_fn("cursor-line", cx_line_within_text);
+    module.register_fn("cursor-column", cx_column_within_text);
     module.register_fn("mode-switch-old", OnModeSwitchEvent::get_old_mode);
     module.register_fn("mode-switch-new", OnModeSwitchEvent::get_new_mode);
 
@@ -3600,6 +3602,14 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
     template_function_arity_0(
         "cursor-position",
         "Returns the cursor position within the current buffer as an integer",
+    );
+    template_function_arity_0(
+        "cursor-line",
+        "Returns the cursor line within the current buffer as an integer",
+    );
+    template_function_arity_0(
+        "cursor-column",
+        "Returns the cursor column within the current buffer as an integer",
     );
 
     let mut template_function_arity_1 = |name: &str, doc: &str| {
@@ -4932,6 +4942,33 @@ pub fn cx_pos_within_text(cx: &mut Context) -> usize {
     let pos = selection.primary().cursor(text);
 
     pos
+}
+
+pub fn cx_line_within_text(cx: &mut Context) -> usize {
+    let (view, doc) = current_ref!(cx.editor);
+
+    let text = doc.text().slice(..);
+
+    let selection = doc.selection(view.id).clone();
+
+    let pos = selection.primary().cursor(text);
+
+    text.char_to_line(pos)
+}
+
+pub fn cx_column_within_text(cx: &mut Context) -> usize {
+    let (view, doc) = current_ref!(cx.editor);
+
+    let text = doc.text().slice(..);
+
+    let selection = doc.selection(view.id).clone();
+
+    let pos = selection.primary().cursor(text);
+
+    let line = text.char_to_line(pos);
+    let line_start = text.line_to_char(line);
+
+    pos - line_start
 }
 
 pub fn get_helix_cwd(_cx: &mut Context) -> Option<String> {
