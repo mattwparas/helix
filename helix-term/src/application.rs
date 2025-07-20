@@ -924,11 +924,11 @@ impl Application {
                             "Language Server: Method {} not found in request {}",
                             method, id
                         );
-                        Some(Err(helix_lsp::jsonrpc::Error {
+                        Err(helix_lsp::jsonrpc::Error {
                             code: helix_lsp::jsonrpc::ErrorCode::MethodNotFound,
                             message: format!("Method not found: {}", method),
                             data: None,
-                        }))
+                        })
                     }
                     Err(err) => {
                         log::error!(
@@ -937,11 +937,11 @@ impl Application {
                             id,
                             err
                         );
-                        Some(Err(helix_lsp::jsonrpc::Error {
+                        Err(helix_lsp::jsonrpc::Error {
                             code: helix_lsp::jsonrpc::ErrorCode::ParseError,
                             message: format!("Malformed method call: {}", method),
                             data: None,
-                        }))
+                        })
                     }
                     Ok(MethodCall::WorkDoneProgressCreate(params)) => {
                         self.lsp_progress.create(server_id, params.token);
@@ -955,7 +955,7 @@ impl Application {
                             spinner.start();
                         }
 
-                        Some(Ok(serde_json::Value::Null))
+                        Ok(serde_json::Value::Null)
                     }
                     Ok(MethodCall::ApplyWorkspaceEdit(params)) => {
                         let language_server = language_server!();
@@ -965,25 +965,25 @@ impl Application {
                                 .editor
                                 .apply_workspace_edit(offset_encoding, &params.edit);
 
-                            Some(Ok(json!(lsp::ApplyWorkspaceEditResponse {
+                            Ok(json!(lsp::ApplyWorkspaceEditResponse {
                                 applied: res.is_ok(),
                                 failure_reason: res.as_ref().err().map(|err| err.kind.to_string()),
                                 failed_change: res
                                     .as_ref()
                                     .err()
                                     .map(|err| err.failed_change_idx as u32),
-                            })))
+                            }))
                         } else {
-                            Some(Err(helix_lsp::jsonrpc::Error {
+                            Err(helix_lsp::jsonrpc::Error {
                                 code: helix_lsp::jsonrpc::ErrorCode::InvalidRequest,
                                 message: "Server must be initialized to request workspace edits"
                                     .to_string(),
                                 data: None,
-                            }))
+                            })
                         }
                     }
                     Ok(MethodCall::WorkspaceFolders) => {
-                        Some(Ok(json!(&*language_server!().workspace_folders().await)))
+                        Ok(json!(&*language_server!().workspace_folders().await))
                     }
                     Ok(MethodCall::WorkspaceConfiguration(params)) => {
                         let language_server = language_server!();
@@ -1003,7 +1003,7 @@ impl Application {
                                 Some(config)
                             })
                             .collect();
-                        Some(Ok(json!(result)))
+                        Ok(json!(result))
                     }
                     Ok(MethodCall::RegisterCapability(params)) => {
                         if let Some(client) = self.editor.language_servers.get_by_id(server_id) {
@@ -1041,7 +1041,7 @@ impl Application {
                             }
                         }
 
-                        Some(Ok(serde_json::Value::Null))
+                        Ok(serde_json::Value::Null)
                     }
                     Ok(MethodCall::UnregisterCapability(params)) => {
                         for unreg in params.unregisterations {
@@ -1057,14 +1057,14 @@ impl Application {
                                 }
                             }
                         }
-                        Some(Ok(serde_json::Value::Null))
+                        Ok(serde_json::Value::Null)
                     }
                     Ok(MethodCall::ShowDocument(params)) => {
                         let language_server = language_server!();
                         let offset_encoding = language_server.offset_encoding();
 
                         let result = self.handle_show_document(params, offset_encoding);
-                        Some(Ok(json!(result)))
+                        Ok(json!(result))
                     }
                     Ok(MethodCall::Other(event_name, params)) => {
                         let server_id = server_id;
@@ -1082,7 +1082,7 @@ impl Application {
                             id.clone(),
                             params,
                         );
-                        match result {
+                        let reply = match result {
                             Some(SteelVal::Void) => None,
                             Some(value) => {
                                 let serde_value: Result<serde_json::Value, steel::SteelErr> =
@@ -1096,20 +1096,30 @@ impl Application {
                                 }
                             }
                             _ => None,
-                        }
+                        };
+
+                        if let Some(reply) = reply {
+                            let language_server = language_server!();
+                            if let Err(err) = language_server.reply(id.clone(), reply) {
+                                log::error!(
+                                    "Failed to send reply to server '{}' request {id}: {err}",
+                                    language_server.name()
+                                );
+                            }
+                        };
+                        return;
                     }
                 };
 
-                if let Some(reply) = reply {
-                    let language_server = language_server!();
-                    if let Err(err) = language_server.reply(id.clone(), reply) {
-                        log::error!(
-                            "Failed to send reply to server '{}' request {id}: {err}",
-                            language_server.name()
-                        );
-                    }
+                let language_server = language_server!();
+                if let Err(err) = language_server.reply(id.clone(), reply) {
+                    log::error!(
+                        "Failed to send reply to server '{}' request {id}: {err}",
+                        language_server.name()
+                    );
                 }
             }
+
             Call::Invalid { id } => log::error!("LSP invalid method call id={:?}", id),
         }
     }

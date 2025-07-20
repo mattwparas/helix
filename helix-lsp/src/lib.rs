@@ -496,7 +496,7 @@ impl MethodCall {
                 let params: lsp::ShowDocumentParams = params.parse()?;
                 Self::ShowDocument(params)
             }
-            _ => Self::Other(method.to_owned(), params)
+            _ => Self::Other(method.to_owned(), params),
         };
         Ok(request)
     }
