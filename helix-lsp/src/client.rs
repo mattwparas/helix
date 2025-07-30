@@ -516,25 +516,6 @@ impl Client {
         }
     }
 
-    /// Send a custom RPC notification with arbitrary method and params to the language server.
-    pub fn send_custom_notification(&self, method: String, params: Option<Value>) -> Result<()> {
-        let server_tx = self.server_tx.clone();
-
-        let params = params.unwrap_or(Value::Null);
-
-        let notification = jsonrpc::Notification {
-            jsonrpc: Some(jsonrpc::Version::V2),
-            method,
-            params: Self::value_into_params(params),
-        };
-
-        server_tx
-            .send(Payload::Notification(notification))
-            .map_err(|e| Error::Other(e.into()))?;
-
-        Ok(())
-    }
-
     /// Reply to a language server RPC call.
     pub fn reply(
         &self,
@@ -1626,6 +1607,25 @@ impl Client {
                 .map_err(|_| Error::Timeout(id))? // return Timeout
                 .ok_or(Error::StreamClosed)?
         }
+    }
+
+    /// Send a custom RPC notification with arbitrary method and params to the language server.
+    pub fn send_custom_notification(&self, method: String, params: Option<Value>) -> Result<()> {
+        let server_tx = self.server_tx.clone();
+
+        let params = params.unwrap_or(Value::Null);
+
+        let notification = jsonrpc::Notification {
+            jsonrpc: Some(jsonrpc::Version::V2),
+            method,
+            params: Self::value_into_params(params),
+        };
+
+        server_tx
+            .send(Payload::Notification(notification))
+            .map_err(|e| Error::Other(e.into()))?;
+
+        Ok(())
     }
 }
 

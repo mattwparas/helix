@@ -225,6 +225,33 @@ fn register_lsp_notification_callback(lsp: String, kind: String, function: Steel
         .insert((lsp, kind), LspKind::Notification(rooted));
 }
 
+fn send_arbitrary_lsp_notification(
+    cx: &mut Context,
+    name: SteelString,
+    method: SteelString,
+    params: Option<SteelVal>,
+) -> anyhow::Result<()> {
+    let argument = params.map(|x| serde_json::Value::try_from(x).unwrap());
+
+    let (_view, doc) = current!(cx.editor);
+
+    let language_server_id = anyhow::Context::context(
+        doc.language_servers().find(|x| x.name() == name.as_str()),
+        "Unable to find the language server specified!",
+    )?
+    .id();
+
+    let language_server = cx
+        .editor
+        .language_server_by_id(language_server_id)
+        .ok_or(anyhow::anyhow!("Failed to find a language server by id"))?;
+
+    // Send the notification using the custom method and arguments
+    language_server.send_custom_notification(method.to_string(), argument)?;
+
+    Ok(())
+}
+
 pub struct BufferExtensionKeyMap {
     map: HashMap<String, EmbeddedKeyMap>,
     reverse: HashMap<usize, String>,
@@ -3876,13 +3903,12 @@ callback : (-> any?)
     ;; 
     ;; # Example
     ;; ```scheme
-    ;; (define (send-completion-notification)
-    ;;   (send-lsp-notification "copilot-ls"
-    ;;                         "textDocument/didShowCompletion"
-    ;;                         (hash "item" 
-    ;;                               (hash "insertText" "a helpful suggestion"
-    ;;                                     "range" (hash "start" (hash "line" 1 "character" 0)
-    ;;                                                   "end" (hash "line" 1 "character" 2))))))
+    ;; (send-lsp-notification "copilot"
+    ;;                        "textDocument/didShowCompletion"
+    ;;                        (hash "item"
+    ;;                              (hash "insertText" "a helpful suggestion"
+    ;;                                    "range" (hash "start" (hash "line" 1 "character" 0)
+    ;;                                                  "end" (hash "line" 1 "character" 2)))))
     ;; ```
     (define (send-lsp-notification lsp-name method-name params)
         (helix.send-lsp-notification *helix.cx* lsp-name method-name params))
@@ -5360,33 +5386,6 @@ fn lsp_reply_ok(
                 .reply(jsonrpc::Id::Str(id.to_string()), Ok(value))
                 .map_err(Into::into)
         })
-}
-
-fn send_arbitrary_lsp_notification(
-    cx: &mut Context,
-    name: SteelString,
-    method: SteelString,
-    params: Option<SteelVal>,
-) -> anyhow::Result<()> {
-    let argument = params.map(|x| serde_json::Value::try_from(x).unwrap());
-
-    let (_view, doc) = current!(cx.editor);
-
-    let language_server_id = anyhow::Context::context(
-        doc.language_servers().find(|x| x.name() == name.as_str()),
-        "Unable to find the language server specified!",
-    )?
-    .id();
-
-    let language_server = cx
-        .editor
-        .language_server_by_id(language_server_id)
-        .ok_or(anyhow::anyhow!("Failed to find a language server by id"))?;
-
-    // Send the notification using the custom method and arguments
-    language_server.send_custom_notification(method.to_string(), argument)?;
-
-    Ok(())
 }
 
 fn create_callback<T: TryInto<SteelVal, Error = SteelErr> + 'static>(
