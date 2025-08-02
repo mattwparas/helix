@@ -5,15 +5,18 @@ use helix_core::{
     diagnostic::Severity,
     extensions::steel_implementations::{rope_module, SteelRopeSlice},
     find_workspace, graphemes,
-    syntax::config::{
-        default_timeout, AutoPairConfig, LanguageConfiguration, LanguageServerConfiguration,
-        SoftWrap,
+    syntax::{
+        self,
+        config::{
+            default_timeout, AutoPairConfig, LanguageConfiguration, LanguageServerConfiguration,
+            SoftWrap,
+        },
     },
-    syntax::{self},
     text_annotations::InlineAnnotation,
-    Range, Selection, Tendril,
+    Range, Selection, Tendril, Transaction,
 };
 use helix_event::register_hook;
+use helix_lsp::jsonrpc;
 use helix_view::{
     annotations::diagnostics::DiagnosticFilter,
     document::{DocumentInlayHints, DocumentInlayHintsId, Mode},
@@ -73,7 +76,7 @@ use super::{
     components::{self, helix_component_module},
     Context, MappableCommand, TYPABLE_COMMAND_LIST,
 };
-use insert::{insert_char, insert_string};
+use insert::insert_char;
 
 pub static INTERRUPT_HANDLER: OnceCell<InterruptHandler> = OnceCell::new();
 
@@ -198,16 +201,30 @@ static BUFFER_EXTENSION_KEYMAP: Lazy<RwLock<BufferExtensionKeyMap>> = Lazy::new(
     })
 });
 
-pub static LSP_NOTIFICATION_REGISTRY: Lazy<RwLock<HashMap<(String, String), RootedSteelVal>>> =
+enum LspKind {
+    Call(RootedSteelVal),
+    Notification(RootedSteelVal),
+}
+
+static LSP_CALL_REGISTRY: Lazy<RwLock<HashMap<(String, String), LspKind>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+
+fn register_lsp_call_callback(lsp: String, kind: String, function: SteelVal) {
+    let rooted = function.as_rooted();
+
+    LSP_CALL_REGISTRY
+        .write()
+        .unwrap()
+        .insert((lsp, kind), LspKind::Call(rooted));
+}
 
 fn register_lsp_notification_callback(lsp: String, kind: String, function: SteelVal) {
     let rooted = function.as_rooted();
 
-    LSP_NOTIFICATION_REGISTRY
+    LSP_CALL_REGISTRY
         .write()
         .unwrap()
-        .insert((lsp, kind), rooted);
+        .insert((lsp, kind), LspKind::Notification(rooted));
 }
 
 pub struct BufferExtensionKeyMap {
@@ -386,6 +403,21 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         set_selection,
         "Update the selection object to the current selection within the editor"
     );
+    function1!(
+        "push-range-to-selection!",
+        push_range_to_selection,
+        "Push a new range to a selection. The new selection will be the primary one"
+    );
+    function1!(
+        "set-current-selection-primary-index!",
+        set_selection_primary_index,
+        "Set the primary index of the current selection"
+    );
+    function1!(
+        "remove-current-selection-range!",
+        remove_selection_range,
+        "Remove a range from the current selection"
+    );
 
     function1!(
         "regex-selection",
@@ -397,12 +429,6 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         "replace-selection-with",
         replace_selection,
         "Replace the existing selection with the given string"
-    );
-
-    function1!(
-        "cx->current-file",
-        current_path,
-        "Get the currently focused file path"
     );
 
     function1!(
@@ -437,7 +463,18 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
     }
 
     function0!(
+        "cx->current-file",
+        current_path,
+        "Get the currently focused file path"
+    );
+
+    function0!(
         "current_selection",
+        get_selection,
+        "Returns the current selection as a string"
+    );
+    function0!(
+        "current-selection->string",
         get_selection,
         "Returns the current selection as a string"
     );
@@ -451,6 +488,11 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         "get-current-line-number",
         current_line_number,
         "Returns the current line number"
+    );
+    function0!(
+        "get-current-column-number",
+        current_column_number,
+        "Returns the current column number"
     );
     function0!(
         "current-selection-object",
@@ -761,6 +803,8 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         register_lsp_notification_callback,
     );
 
+    module.register_fn("register-lsp-call-handler", register_lsp_call_callback);
+
     module.register_fn("update-configuration!", |ctx: &mut Context| {
         ctx.editor
             .config_events
@@ -925,7 +969,8 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
             "default-line-ending",
             HelixConfiguration::default_line_ending,
         )
-        .register_fn("smart-tab", HelixConfiguration::smart_tab);
+        .register_fn("smart-tab", HelixConfiguration::smart_tab)
+        .register_fn("rainbow-brackets", HelixConfiguration::rainbow_brackets);
 
     // Keybinding stuff
     module
@@ -958,6 +1003,28 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
 ;;                                    (lambda (args) (displayln args)))
 ;; ```
 (define register-lsp-notification-handler helix.register-lsp-notification-handler)
+
+(provide register-lsp-call-handler)
+
+;;@doc
+;; Register a callback to be called on LSP calls sent from the server -> client
+;; that aren't currently handled by Helix as a built in.
+;;
+;; ```scheme
+;; (register-lsp-call-handler lsp-name event-name handler)
+;; ```
+;;
+;; * lsp-name : string?
+;; * event-name : string?
+;; * function : (-> hash? any?) ;; Function where the first argument is the parameters
+;;
+;; # Examples
+;; ```
+;; (register-lsp-call-handler "dart"
+;;                                    "dart/textDocument/publishClosingLabels"
+;;                                    (lambda (call-id args) (displayln args)))
+;; ```
+(define register-lsp-call-handler helix.register-lsp-call-handler)
 
 (provide set-option!)
 (define (set-option! key value)
@@ -1476,6 +1543,7 @@ are shown, set to 5 for instant. Defaults to 250ms.
             ("workspace-lsp-roots", "Workspace specific lsp ceiling dirs"),
             ("default-line-ending", "Which line ending to choose for new documents. Defaults to `native`. i.e. `crlf` on Windows, otherwise `lf`."),
             ("smart-tab", "Enables smart tab"),
+            ("rainbow-brackets", "Enabled rainbow brackets"),
             ("keybindings", "Keybindings config"),
             ("inline-diagnostics-cursor-line-enable", "Inline diagnostics cursor line"),
             ("inline-diagnostics-end-of-line-enable", "Inline diagnostics end of line"),
@@ -1573,9 +1641,8 @@ fn theme_from_json_string(name: String, value: SteelVal) -> Result<SteelTheme, a
 
 // Mutate the theme?
 fn add_theme(cx: &mut Context, theme: SteelTheme) {
-    cx.editor
-        .user_defined_themes
-        .insert(theme.0.name().to_owned(), theme.0);
+    Arc::make_mut(&mut cx.editor.theme_loader)
+        .add_dynamic_theme(theme.0.name().to_owned(), theme.0);
 }
 
 fn get_style(theme: &SteelTheme, name: SteelString) -> helix_view::theme::Style {
@@ -1711,6 +1778,14 @@ Get the `Rect` associated with the currently focused buffer.
 ```
         "#
     );
+    register_0!(
+        "selected-register!",
+        |cx: &mut Context| cx
+            .editor
+            .selected_register
+            .unwrap_or(cx.editor.config().default_yank_register),
+        r#"Get currently selected register"#
+    );
 
     // Arity 1
     module.register_fn("editor->doc-id", cx_get_document_id);
@@ -1729,6 +1804,8 @@ Get the `Rect` associated with the currently focused buffer.
             cx.editor.documents.get(&doc).map(|x| x.last_saved_time())
         },
     );
+
+    module.register_fn("editor-document->language", cx_get_document_language);
 
     module.register_fn(
         "editor-document-dirty?",
@@ -1821,6 +1898,11 @@ Get the `Rect` associated with the currently focused buffer.
         template_function_arity_1(
             "editor-document-last-saved",
             "Check when a document was last saved (returns a `SystemTime`)",
+        );
+
+        template_function_arity_1(
+            "editor-document->language",
+            "Get the language for the document",
         );
 
         template_function_arity_1(
@@ -2116,14 +2198,15 @@ impl super::PluginSystem for SteelScriptingEngine {
 
     // TODO: Should this just be a hook / event instead of a function like this?
     // Handle an LSP notification, assuming its been sent through
-    fn handle_lsp_notification(
+    fn handle_lsp_call(
         &self,
         cx: &mut compositor::Context,
         server_id: helix_lsp::LanguageServerId,
         event_name: String,
+        call_id: jsonrpc::Id,
         params: helix_lsp::jsonrpc::Params,
-    ) -> bool {
-        if let Err(e) = enter_engine(|guard| {
+    ) -> Option<SteelVal> {
+        let result = enter_engine(|guard| {
             {
                 let mut ctx = Context {
                     register: None,
@@ -2146,11 +2229,19 @@ impl super::PluginSystem for SteelScriptingEngine {
 
                 let language_server_name = language_server_name.unwrap();
 
-                let function = LSP_NOTIFICATION_REGISTRY
+                let mut pass_call_id = false;
+
+                let function = LSP_CALL_REGISTRY
                     .read()
                     .unwrap()
                     .get(&(language_server_name, event_name))
-                    .map(|x| x.value())
+                    .map(|x| match x {
+                        LspKind::Call(rooted_steel_val) => {
+                            pass_call_id = true;
+                            rooted_steel_val.value()
+                        }
+                        LspKind::Notification(rooted_steel_val) => rooted_steel_val.value(),
+                    })
                     .cloned();
 
                 if let Some(function) = function {
@@ -2167,19 +2258,41 @@ impl super::PluginSystem for SteelScriptingEngine {
                                     .map_err(|e| SteelErr::new(ErrorKind::Generic, e.to_string()))
                                     .and_then(|x| x.into_steelval())?;
 
-                                let args = vec![params];
+                                if pass_call_id {
+                                    let call_id = serde_json::to_value(&call_id)
+                                        .map_err(|e| {
+                                            SteelErr::new(ErrorKind::Generic, e.to_string())
+                                        })
+                                        .and_then(|x| x.into_steelval())?;
 
-                                engine.call_function_with_args(function.clone(), args)
+                                    let mut arguments = [call_id, params];
+
+                                    engine.call_function_with_args_from_mut_slice(
+                                        function.clone(),
+                                        &mut arguments,
+                                    )
+                                } else {
+                                    let mut arguments = [params];
+                                    engine.call_function_with_args_from_mut_slice(
+                                        function.clone(),
+                                        &mut arguments,
+                                    )
+                                }
                             })
                     })
                 } else {
                     Ok(SteelVal::Void)
                 }
             }
-        }) {
-            cx.editor.set_error(format!("{}", e));
+        });
+
+        match result {
+            Err(e) => {
+                cx.editor.set_error(format!("{}", e));
+                Some(SteelVal::Void)
+            }
+            Ok(value) => Some(value),
         }
-        true
     }
 }
 
@@ -2548,6 +2661,10 @@ impl HelixConfiguration {
 
         if let Some(workspace_lsp_roots) = new_config.workspace_lsp_roots {
             existing_config.workspace_lsp_roots = Some(workspace_lsp_roots);
+        }
+
+        if let Some(rainbow) = new_config.rainbow_brackets {
+            existing_config.rainbow_brackets = Some(rainbow);
         }
 
         if persistent_diagnostic_sources_present {
@@ -2987,6 +3104,12 @@ impl HelixConfiguration {
     fn smart_tab(&self, config: Option<SmartTabConfig>) {
         let mut app_config = self.load_config();
         app_config.editor.smart_tab = config;
+        self.store_config(app_config);
+    }
+
+    fn rainbow_brackets(&self, config: bool) {
+        let mut app_config = self.load_config();
+        app_config.editor.rainbow_brackets = config;
         self.store_config(app_config);
     }
 }
@@ -3434,18 +3557,29 @@ fn configure_lsp_globals() {
     }
 
     writeln!(&mut output, "").unwrap();
+    let search_path = helix_loader::config_dir();
+    let search_path_str = search_path.to_str().unwrap();
+
+    #[cfg(target_os = "windows")]
+    let search_path_str: String = search_path_str.escape_default().collect();
+
     writeln!(
         &mut output,
         "(#%register-additional-search-path \"{}\")",
-        helix_loader::config_dir().to_str().unwrap()
+        search_path_str
     )
     .unwrap();
 
     for dir in helix_loader::runtime_dirs() {
+        let dir = dir.to_str().unwrap();
+
+        #[cfg(target_os = "windows")]
+        let dir: String = dir.escape_default().collect();
+
         writeln!(
             &mut output,
             "(#%register-additional-search-path \"{}\")",
-            dir.to_str().unwrap()
+            dir
         )
         .unwrap();
     }
@@ -3537,6 +3671,31 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
     template_function_arity_0(
         "cursor-position",
         "Returns the cursor position within the current buffer as an integer",
+    );
+
+    let mut template_function_no_context = |name: &str, doc: &str| {
+        if generate_sources {
+            let docstring = format_docstring(doc);
+
+            builtin_misc_module.push_str(&format!(
+                r#"
+(provide {})
+;;@doc
+{}
+(define {} helix.{})                
+            "#,
+                name, docstring, name, name
+            ))
+        }
+    };
+
+    template_function_no_context(
+        "mode-switch-old",
+        "Return the old mode from the event payload",
+    );
+    template_function_no_context(
+        "mode-switch-new",
+        "Return the new mode from the event payload",
     );
 
     let mut template_function_arity_1 = |name: &str, doc: &str| {
@@ -3679,6 +3838,33 @@ callback : (-> any?)
     ;; ```
     (define (send-lsp-command lsp-name method-name params callback)
         (helix.send-lsp-command *helix.cx* lsp-name method-name params callback))
+            "#,
+        );
+    }
+
+    module.register_fn("lsp-reply-ok", lsp_reply_ok);
+    if generate_sources {
+        builtin_misc_module.push_str(
+            r#"
+    (provide lsp-reply-ok)
+    ;;@doc
+    ;; Send a successful reply to an LSP request with the given result.
+    ;;
+    ;; ```scheme
+    ;; (lsp-reply-ok lsp-name request-id result)
+    ;; ```
+    ;; 
+    ;; * lsp-name : string? - Name of the language server
+    ;; * request-id : string? - ID of the request to respond to  
+    ;; * result : any? - The result value to send back
+    ;;
+    ;; # Examples
+    ;; ```scheme
+    ;; ;; Reply to a request with id "123" from rust-analyzer
+    ;; (lsp-reply-ok "rust-analyzer" "123" (hash "result" "value"))
+    ;; ```
+    (define (lsp-reply-ok lsp-name request-id result)
+        (helix.lsp-reply-ok *helix.cx* lsp-name request-id result))    
             "#,
         );
     }
@@ -4386,6 +4572,25 @@ fn set_selection(cx: &mut Context, selection: Selection) {
     doc.set_selection(view.id, selection)
 }
 
+fn push_range_to_selection(cx: &mut Context, range: Range) {
+    let (view, doc) = current!(cx.editor);
+    let selection = doc.selection(view.id).clone();
+    doc.set_selection(view.id, selection.push(range))
+}
+
+fn set_selection_primary_index(cx: &mut Context, primary_index: usize) {
+    let (view, doc) = current!(cx.editor);
+    let mut selection = doc.selection(view.id).clone();
+    selection.set_primary_index(primary_index);
+    doc.set_selection(view.id, selection)
+}
+
+fn remove_selection_range(cx: &mut Context, index: usize) {
+    let (view, doc) = current!(cx.editor);
+    let selection = doc.selection(view.id).clone();
+    doc.set_selection(view.id, selection.remove(index))
+}
+
 fn current_line_number(cx: &mut Context) -> usize {
     let (view, doc) = current_ref!(cx.editor);
     helix_core::coords_at_pos(
@@ -4395,6 +4600,17 @@ fn current_line_number(cx: &mut Context) -> usize {
             .cursor(doc.text().slice(..)),
     )
     .row
+}
+
+fn current_column_number(cx: &mut Context) -> usize {
+    let (view, doc) = current_ref!(cx.editor);
+    helix_core::coords_at_pos(
+        doc.text().slice(..),
+        doc.selection(view.id)
+            .primary()
+            .cursor(doc.text().slice(..)),
+    )
+    .col
 }
 
 fn get_selection(cx: &mut Context) -> String {
@@ -4633,6 +4849,13 @@ fn document_path(cx: &mut Context, doc_id: DocumentId) -> Option<String> {
 
 fn cx_editor_all_documents(cx: &mut Context) -> Vec<DocumentId> {
     cx.editor.documents.keys().copied().collect()
+}
+
+fn cx_get_document_language(cx: &mut Context, doc_id: DocumentId) -> Option<String> {
+    cx.editor
+        .documents
+        .get(&doc_id)
+        .and_then(|d| Some(d.language_name()?.to_string()))
 }
 
 fn cx_switch(cx: &mut Context, doc_id: DocumentId) {
@@ -5058,6 +5281,39 @@ fn send_arbitrary_lsp_command(
     Ok(())
 }
 
+fn lsp_reply_ok(
+    cx: &mut Context,
+    name: SteelString,
+    id: SteelString,
+    result: SteelVal,
+) -> anyhow::Result<()> {
+    let serde_value: Result<serde_json::Value, steel::SteelErr> = result.try_into();
+    let value = match serde_value {
+        Ok(serialized_value) => serialized_value,
+        Err(error) => {
+            log::warn!("Failed to serialize a SteelVal: {}", error);
+            serde_json::Value::Null
+        }
+    };
+
+    let (_view, doc) = current!(cx.editor);
+
+    let language_server_id = anyhow::Context::context(
+        doc.language_servers().find(|x| x.name() == name.as_str()),
+        "Unable to find the language server specified!",
+    )?
+    .id();
+
+    cx.editor
+        .language_server_by_id(language_server_id)
+        .ok_or(anyhow::anyhow!("Failed to find a language server by id"))
+        .and_then(|language_server| {
+            language_server
+                .reply(jsonrpc::Id::Str(id.to_string()), Ok(value))
+                .map_err(Into::into)
+        })
+}
+
 fn create_callback<T: TryInto<SteelVal, Error = SteelErr> + 'static>(
     cx: &mut Context,
     future: impl std::future::Future<Output = Result<T, helix_lsp::Error>> + 'static,
@@ -5229,4 +5485,16 @@ pub fn remove_inlay_hint(cx: &mut Context, char_index: usize, _completion: Steel
         .retain(|x| x.char_idx != char_index);
     doc.set_inlay_hints(view_id, new_inlay_hints);
     true
+}
+
+pub fn insert_string(cx: &mut Context, string: SteelString) {
+    let (view, doc) = current!(cx.editor);
+
+    let indent = Tendril::from(string.as_str());
+    let transaction = Transaction::insert(
+        doc.text(),
+        &doc.selection(view.id).clone().cursors(doc.text().slice(..)),
+        indent,
+    );
+    doc.apply(&transaction, view.id);
 }

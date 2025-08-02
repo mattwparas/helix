@@ -38,6 +38,8 @@ pub mod tasks {
             let grammar = syntax_config.grammar;
             LanguageData::compile_indent_query(grammar, config)?;
             LanguageData::compile_textobject_query(grammar, config)?;
+            LanguageData::compile_tag_query(grammar, config)?;
+            LanguageData::compile_rainbow_query(grammar, config)?;
         }
 
         println!("Query check succeeded");
@@ -145,7 +147,7 @@ pub mod tasks {
 Usage: Run with `cargo xtask <task>`, eg. `cargo xtask docgen`.
 
     Tasks:
-        steel:                     Install steel
+        steel                     Install steel
         docgen                     Generate files to be included in the mdbook output.
         query-check [languages]    Check that tree-sitter queries are valid for the given
                                    languages, or all languages if none are specified.

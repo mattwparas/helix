@@ -1475,6 +1475,14 @@ The key modifier bits associated with the shift key modifier.
 The key modifier bits associated with the alt key modifier.
         "#
     );
+    register!(
+        value,
+        "key-modifier-super",
+        SteelVal::IntV(KeyModifiers::SUPER.bits() as isize),
+        r#"
+The key modifier bits associated with the super key modifier.
+        "#
+    );
 
     register!(
         "key-event-F?",
@@ -1665,6 +1673,7 @@ event: Event?"#, $name, $name));
         "up" => Up,
         "down" => Down,
         "home" => Home,
+        "end" => End,
         "page-up" => PageUp,
         "page-down" => PageDown,
         "tab" => Tab,
@@ -2008,17 +2017,63 @@ impl Component for SteelDynamicComponent {
                 )
             };
 
-            let result =
-                Option::<helix_core::Position>::from_steelval(&enter_engine(|x| thunk(x).unwrap()));
+            let cursor_call_result = enter_engine(|x| thunk(x));
 
-            match result {
-                Ok(v) => (v, CursorKind::Block),
-                // TODO: Figure out how to pop up an error message
-                Err(_e) => {
-                    log::info!("Error: {:?}", _e);
+            match cursor_call_result {
+                Ok(c) => match c {
+                    // Specify the style of the list
+                    SteelVal::ListV(generic_list) => {
+                        if generic_list.len() != 2 {
+                            log::info!("Error: Unable to destructure list of length: {} while setting the cursor position", generic_list.len());
+                            (None, CursorKind::Block)
+                        } else {
+                            let maybe_position = Option::<helix_core::Position>::from_steelval(
+                                generic_list.get(0).unwrap(),
+                            );
+
+                            let cursor_kind = match generic_list.get(1) {
+                                Some(SteelVal::SymbolV(s) | SteelVal::StringV(s)) => {
+                                    match s.as_str() {
+                                        "block" => CursorKind::Block,
+                                        "hidden" => CursorKind::Hidden,
+                                        "bar" => CursorKind::Bar,
+                                        "underline" => CursorKind::Underline,
+                                        _ => CursorKind::Block,
+                                    }
+                                }
+
+                                _ => CursorKind::Block,
+                            };
+
+                            match maybe_position {
+                                Ok(v) => (v, cursor_kind),
+                                Err(e) => {
+                                    log::info!("Error: {:?}", e);
+                                    (None, cursor_kind)
+                                }
+                            }
+                        }
+                    }
+                    other => {
+                        let result = Option::<helix_core::Position>::from_steelval(&other);
+                        match result {
+                            Ok(v) => (v, CursorKind::Block),
+                            // TODO: Figure out how to pop up an error message
+                            Err(_e) => {
+                                log::info!("Error: {:?}", _e);
+                                (None, CursorKind::Block)
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    log::info!("Error: {:?}", e);
                     (None, CursorKind::Block)
                 }
             }
+
+            // let result =
+            //     Option::<helix_core::Position>::from_steelval(&enter_engine(|x| thunk(x).unwrap()));
         } else {
             (None, helix_view::graphics::CursorKind::Hidden)
         }
