@@ -92,6 +92,19 @@
         helix = final.callPackage ./default.nix {inherit gitRev;};
       };
 
+      # NOTE: Add `helix` overlay before `enable-steel-integration`:
+      # ```nix
+      # nixpkgs.overlays = [
+      #   helix.overlays.helix
+      #   helix.overlays.enable-steel-integration
+      # ];
+      # ```
+      enable-steel-integration = _: prev: {
+        helix = prev.helix.overrideAttrs (oa: {
+          cargoBuildFeatures = (oa.cargoBuildFeatures or []) ++ [ "steel" ];
+        });
+      };
+
       default = self.overlays.helix;
     };
   };
