@@ -18,7 +18,7 @@ use helix_core::{
     Range, Selection, Tendril, Transaction,
 };
 use helix_event::register_hook;
-use helix_lsp::jsonrpc;
+use helix_lsp::{jsonrpc, LanguageServerId};
 use helix_view::{
     annotations::diagnostics::DiagnosticFilter,
     document::{DocumentInlayHints, DocumentInlayHintsId, Mode},
@@ -4095,6 +4095,12 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         "Returns the cursor position within the current buffer as an integer",
     );
 
+    module.register_fn("get-active-lsp-clients", get_active_lsp_clients);
+    template_function_arity_0(
+        "get-active-lsp-clients",
+        "Get all language servers, that are attached to the current buffer",
+    );
+
     let mut template_function_no_context = |name: &str, doc: &str| {
         if generate_sources {
             let docstring = format_docstring(doc);
@@ -4235,6 +4241,17 @@ callback : (-> any?)
         "set-error!",
         set_error,
         "Sets the content of the status line, with the error severity"
+    );
+
+    register_1!(
+        "lsp-client-name",
+        lsp_client_name,
+        "Get the name of the lsp client"
+    );
+    register_1!(
+        "lsp-client-offset-encoding",
+        lsp_client_offset_encoding,
+        "Get the offset encoding of the lsp client"
     );
 
     module.register_fn("send-lsp-command", send_arbitrary_lsp_command);
@@ -5687,6 +5704,29 @@ fn move_window_to_the_right(cx: &mut Context) {
         .swap_split_in_direction(helix_view::tree::Direction::Right)
         .is_some()
     {}
+}
+
+fn get_active_lsp_clients(cx: &mut Context) -> SteelVal {
+    let (_, doc) = current!(cx.editor);
+    SteelVal::ListV(
+        doc.language_servers()
+            .map(|client| client.id().into_steelval().unwrap())
+            .collect(),
+    )
+}
+
+fn lsp_client_name(cx: &mut Context, client: LanguageServerId) -> Option<String> {
+    let client = cx.editor.language_servers.get_by_id(client);
+    client.map(|client| client.name().to_owned())
+}
+
+fn lsp_client_offset_encoding(cx: &mut Context, client: LanguageServerId) -> Option<&'static str> {
+    let client = cx.editor.language_servers.get_by_id(client);
+    client.map(|client| match client.offset_encoding() {
+        helix_lsp::OffsetEncoding::Utf8 => "utf-8",
+        helix_lsp::OffsetEncoding::Utf16 => "utf-16",
+        helix_lsp::OffsetEncoding::Utf32 => "utf-32",
+    })
 }
 
 fn send_arbitrary_lsp_command(
