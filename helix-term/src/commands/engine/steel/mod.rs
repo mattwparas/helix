@@ -18,7 +18,7 @@ use helix_core::{
     Range, Selection, Tendril, Transaction,
 };
 use helix_event::register_hook;
-use helix_lsp::{jsonrpc, LanguageServerId};
+use helix_lsp::jsonrpc;
 use helix_view::{
     annotations::diagnostics::DiagnosticFilter,
     document::{DocumentInlayHints, DocumentInlayHintsId, Mode},
@@ -4126,6 +4126,14 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         "Return the new mode from the event payload",
     );
 
+    module.register_fn("lsp-client-name", lsp_client_name);
+    template_function_no_context("lsp-client-name", "Get the name of the lsp client");
+    module.register_fn("lsp-client-offset-encoding", lsp_client_offset_encoding);
+    template_function_no_context(
+        "lsp-client-offset-encoding",
+        "Get the offset encoding of the lsp client",
+    );
+
     let mut template_function_arity_1 = |name: &str, doc: &str| {
         let doc = format_docstring(doc);
         if generate_sources {
@@ -4241,17 +4249,6 @@ callback : (-> any?)
         "set-error!",
         set_error,
         "Sets the content of the status line, with the error severity"
-    );
-
-    register_1!(
-        "lsp-client-name",
-        lsp_client_name,
-        "Get the name of the lsp client"
-    );
-    register_1!(
-        "lsp-client-offset-encoding",
-        lsp_client_offset_encoding,
-        "Get the offset encoding of the lsp client"
     );
 
     module.register_fn("send-lsp-command", send_arbitrary_lsp_command);
@@ -5706,27 +5703,42 @@ fn move_window_to_the_right(cx: &mut Context) {
     {}
 }
 
+#[derive(Debug, Clone)]
+struct LspClient {
+    name: String,
+    offset_encoding: helix_lsp::OffsetEncoding,
+}
+
+impl LspClient {
+    fn new(client: &helix_lsp::Client) -> Self {
+        LspClient {
+            name: client.name().to_owned(),
+            offset_encoding: client.offset_encoding(),
+        }
+    }
+}
+
+impl Custom for LspClient {}
+
 fn get_active_lsp_clients(cx: &mut Context) -> SteelVal {
     let (_, doc) = current!(cx.editor);
     SteelVal::ListV(
         doc.language_servers()
-            .map(|client| client.id().into_steelval().unwrap())
+            .map(|client| LspClient::new(client).into_steelval().unwrap())
             .collect(),
     )
 }
 
-fn lsp_client_name(cx: &mut Context, client: LanguageServerId) -> Option<String> {
-    let client = cx.editor.language_servers.get_by_id(client);
-    client.map(|client| client.name().to_owned())
+fn lsp_client_name(client: LspClient) -> String {
+    client.name.clone()
 }
 
-fn lsp_client_offset_encoding(cx: &mut Context, client: LanguageServerId) -> Option<&'static str> {
-    let client = cx.editor.language_servers.get_by_id(client);
-    client.map(|client| match client.offset_encoding() {
+fn lsp_client_offset_encoding(client: LspClient) -> &'static str {
+    match client.offset_encoding {
         helix_lsp::OffsetEncoding::Utf8 => "utf-8",
         helix_lsp::OffsetEncoding::Utf16 => "utf-16",
         helix_lsp::OffsetEncoding::Utf32 => "utf-32",
-    })
+    }
 }
 
 fn send_arbitrary_lsp_command(

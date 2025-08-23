@@ -100,6 +100,3 @@ impl Diagnostic {
         self.severity.unwrap_or(Severity::Warning)
     }
 }
-
-#[cfg(feature = "steel")]
-impl steel::rvals::Custom for LanguageServerId {}
