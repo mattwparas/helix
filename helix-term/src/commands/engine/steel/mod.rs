@@ -185,19 +185,19 @@ where
 {
     // Unpark the other thread, get it ready
     let handler = SAFEPOINT_HANDLER.get();
-    handler.as_ref().map(|x| {
+    if let Some(x) = handler {
         x.running_command
             .store(true, std::sync::atomic::Ordering::Relaxed);
         x.handle.thread().unpark();
-    });
+    };
 
-    let res = (f)(&mut acquire_engine_lock());
+    let res = f(&mut acquire_engine_lock());
 
-    handler.as_ref().map(|x| {
+    if let Some(x) = handler {
         x.running_command
             .store(false, std::sync::atomic::Ordering::Relaxed);
         x.handle.thread().unpark();
-    });
+    };
 
     res
 }
@@ -1261,29 +1261,29 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
             "#,
         );
 
-        builtin_configuration_module.push_str(&format!(
+        builtin_configuration_module.push_str(
             r#"
 (provide update-configuration!)
 (define (update-configuration!)
     (helix.update-configuration! *helix.config*))
 "#,
-        ));
+        );
 
-        builtin_configuration_module.push_str(&format!(
+        builtin_configuration_module.push_str(
             r#"
 (provide get-config-option-value)
 (define (get-config-option-value arg)
     (helix.get-config-option-value *helix.cx* arg))
 "#,
-        ));
+        );
 
-        builtin_configuration_module.push_str(&format!(
+        builtin_configuration_module.push_str(
             r#"
 (provide set-configuration-for-file!)
 (define (set-configuration-for-file! path config)
     (helix.set-configuration-for-file! *helix.cx* path config))
 "#,
-        ));
+        );
 
         builtin_configuration_module.push_str(
             r#"
@@ -1331,13 +1331,13 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         );
 
         // Register the get keybindings function
-        builtin_configuration_module.push_str(&format!(
+        builtin_configuration_module.push_str(
             r#"
 (provide get-keybindings)
 (define (get-keybindings)
     (helix.get-keybindings *helix.config*))
 "#,
-        ));
+        );
 
         let mut template_soft_wrap = |name: &str| {
             builtin_configuration_module.push_str(&format!(
@@ -1443,7 +1443,7 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
             "#,
         );
 
-        builtin_configuration_module.push_str(&format!(
+        builtin_configuration_module.push_str(
             r#"
 (provide file-picker)
 ;;@doc
@@ -1484,9 +1484,9 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         *helix.config*
         (foldl (lambda (func config) (func config)) (helix.raw-file-picker) args)))
 "#,
-        ));
+        );
 
-        builtin_configuration_module.push_str(&format!(
+        builtin_configuration_module.push_str(
             r#"
 (provide soft-wrap-kw)
 ;;@doc
@@ -1543,9 +1543,9 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
     (helix.sw-wrap-at-text-width sw wrap-at-text-width)
     (helix.register-soft-wrap *helix.config* sw))
 "#,
-        ));
+        );
 
-        builtin_configuration_module.push_str(&format!(
+        builtin_configuration_module.push_str(
             r#"
 
 (provide soft-wrap)
@@ -1595,7 +1595,7 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         *helix.config*
         (foldl (lambda (func config) (func config)) (helix.raw-soft-wrap) args)))
 "#,
-        ));
+        );
 
         let mut template_function_arity_1 = |name: &str, doc: &str| {
             let doc = format_docstring(doc);
@@ -1765,7 +1765,7 @@ fn add_theme(cx: &mut Context, theme: SteelTheme) {
 }
 
 fn get_style(theme: &SteelTheme, name: SteelString) -> helix_view::theme::Style {
-    theme.0.get(name.as_str()).clone()
+    theme.0.get(name.as_str())
 }
 
 fn set_style(theme: &mut SteelTheme, name: String, style: helix_view::theme::Style) {
@@ -2134,7 +2134,7 @@ impl super::PluginSystem for SteelScriptingEngine {
         cxt: &mut Context,
         event: KeyEvent,
     ) -> Option<KeymapResult> {
-        SteelScriptingEngine::handle_keymap_event_impl(&self, editor, mode, cxt, event)
+        SteelScriptingEngine::handle_keymap_event_impl(self, editor, mode, cxt, event)
     }
 
     fn call_function_by_name(&self, cx: &mut Context, name: &str, args: &[Cow<str>]) -> bool {
@@ -2230,10 +2230,10 @@ impl super::PluginSystem for SteelScriptingEngine {
                     let mut ctx = Context {
                         register: None,
                         count: None,
-                        editor: &mut cx.editor,
+                        editor: cx.editor,
                         callback: Vec::new(),
                         on_next_key_callback: None,
-                        jobs: &mut cx.jobs,
+                        jobs: cx.jobs,
                     };
 
                     enter_engine(|x| present_error_inside_engine_context(&mut ctx, x, e));
@@ -2309,14 +2309,11 @@ impl super::PluginSystem for SteelScriptingEngine {
                 if let Some(value) = module.documentation().get(name) {
                     found_definitions.insert(name.to_string());
 
-                    match value {
-                        steel::steel_vm::builtin::Documentation::Markdown(m) => {
-                            let escaped = name.replace("*", "\\*");
-                            writeln!(&mut writer, "### **{}**", escaped).unwrap();
+                    if let steel::steel_vm::builtin::Documentation::Markdown(m) = value {
+                        let escaped = name.replace("*", "\\*");
+                        writeln!(&mut writer, "### **{}**", escaped).unwrap();
 
-                            format_markdown_doc(&mut writer, &m.0);
-                        }
-                        _ => {}
+                        format_markdown_doc(&mut writer, &m.0);
                     }
                 }
             }
@@ -2342,10 +2339,10 @@ impl super::PluginSystem for SteelScriptingEngine {
         let mut ctx = Context {
             register: None,
             count: None,
-            editor: &mut cx.editor,
+            editor: cx.editor,
             callback: Vec::new(),
             on_next_key_callback: None,
-            jobs: &mut cx.jobs,
+            jobs: cx.jobs,
         };
 
         let language_server_name = ctx
@@ -2462,9 +2459,7 @@ impl SteelScriptingEngine {
         let doc_id = {
             let current_focus = cx.editor.tree.focus;
             let view = cx.editor.tree.get(current_focus);
-            let doc = &view.doc;
-
-            doc
+            &view.doc
         };
 
         if let Some(extension) = extension {
@@ -4555,7 +4550,7 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
                 .collect::<Vec<SteelVal>>();
         }
 
-        return Vec::new();
+        Vec::new()
     });
 
     // Find the workspace
@@ -5271,9 +5266,7 @@ fn await_value(cx: &mut Context, value: SteelVal, callback_fn: SteelVal) {
 fn create_directory(path: String) {
     let path = helix_stdx::path::canonicalize(&PathBuf::from(path));
 
-    if path.exists() {
-        return;
-    } else {
+    if !path.exists() {
         std::fs::create_dir(path).unwrap();
     }
 }
@@ -5285,9 +5278,7 @@ pub fn cx_pos_within_text(cx: &mut Context) -> usize {
 
     let selection = doc.selection(view.id).clone();
 
-    let pos = selection.primary().cursor(text);
-
-    pos
+    selection.primary().cursor(text)
 }
 
 pub fn get_helix_cwd(_cx: &mut Context) -> Option<String> {
@@ -5674,7 +5665,7 @@ pub fn remove_inlay_hint_by_id(
         return Some(());
     }
 
-    return None;
+    None
 }
 
 // "remove-inlay-hint",
