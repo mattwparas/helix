@@ -410,7 +410,7 @@ pub fn format_docstring(doc: &str) -> String {
         .map(|x| {
             let mut line = ";;".to_string();
             line.push_str(x);
-            line.push_str("\n");
+            line.push('\n');
             line
         })
         .collect::<String>();
@@ -966,7 +966,7 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
     );
 
     module
-        .register_fn("raw-cursor-shape", || CursorShapeConfig::default())
+        .register_fn("raw-cursor-shape", CursorShapeConfig::default)
         .register_fn(
             "raw-cursor-shape-set!",
             |value: SteelVal, mode: String, shape: String| -> anyhow::Result<SteelVal> {
@@ -994,7 +994,7 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         );
 
     module
-        .register_fn("raw-file-picker", || FilePickerConfig::default())
+        .register_fn("raw-file-picker", FilePickerConfig::default)
         .register_fn("register-file-picker", HelixConfiguration::file_picker)
         .register_fn("fp-hidden", fp_hidden)
         .register_fn("fp-follow-symlinks", fp_follow_symlinks)
@@ -1007,7 +1007,7 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn("fp-max-depth", fp_max_depth);
 
     module
-        .register_fn("raw-soft-wrap", || SoftWrap::default())
+        .register_fn("raw-soft-wrap", SoftWrap::default)
         .register_fn("register-soft-wrap", HelixConfiguration::soft_wrap)
         .register_fn("sw-enable", sw_enable)
         .register_fn("sw-max-wrap", sw_max_wrap)
@@ -1033,7 +1033,7 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
             AutoPairConfig::Pairs(map)
         })
         // TODO: Finish this up
-        .register_fn("auto-save-default", || AutoSave::default())
+        .register_fn("auto-save-default", AutoSave::default)
         .register_fn(
             "auto-save-after-delay-enable",
             HelixConfiguration::auto_save_after_delay_enable,
@@ -2937,7 +2937,7 @@ impl HelixConfiguration {
         let config = config.config;
 
         for lconfig in loader.language_configs_mut() {
-            if &lconfig.language_id == &config.language_id {
+            if lconfig.language_id == config.language_id {
                 if let Some(inner) = Arc::get_mut(lconfig) {
                     *inner = config;
                 } else {
@@ -3698,8 +3698,7 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
 
 fn configure_lsp_globals() {
     use std::fmt::Write;
-    let steel_lsp_home = steel_lsp_home_dir();
-    let mut path = PathBuf::from(steel_lsp_home);
+    let mut path = steel_lsp_home_dir();
     path.push("_helix-global-builtins.scm");
 
     let mut output = String::new();
@@ -3728,7 +3727,7 @@ fn configure_lsp_globals() {
         writeln!(&mut output, "(#%register-global '{})", value).unwrap();
     }
 
-    writeln!(&mut output, "").unwrap();
+    writeln!(&mut output).unwrap();
     let search_path = helix_loader::config_dir();
     let search_path_str = search_path.to_str().unwrap();
 
@@ -3761,9 +3760,8 @@ fn configure_lsp_globals() {
 
 fn configure_lsp_builtins(name: &str, module: &BuiltInModule) {
     use std::fmt::Write;
-    let steel_lsp_home = steel_lsp_home_dir();
-    let mut path = PathBuf::from(steel_lsp_home);
-    path.push(&format!("_helix-{}-builtins.scm", name));
+    let mut path = steel_lsp_home_dir();
+    path.push(format!("_helix-{}-builtins.scm", name));
 
     let mut output = String::new();
 
@@ -4262,11 +4260,7 @@ last-line : int?
 // LSP can go find it. When it comes to loading though, it'll look
 // up internally.
 pub fn alternative_runtime_search_path() -> Option<PathBuf> {
-    if let Some(path) = steel_home() {
-        Some(PathBuf::from(path).join("cogs").join("helix"))
-    } else {
-        None
-    }
+    steel_home().map(|path| PathBuf::from(path).join("cogs").join("helix"))
 }
 
 pub fn generate_cog_file() {
@@ -4372,7 +4366,7 @@ pub fn load_ext_api(engine: &mut Engine, generate_sources: bool) {
 
             target_directory.push("ext.scm");
 
-            std::fs::write(target_directory, &ext_api).unwrap();
+            std::fs::write(target_directory, ext_api).unwrap();
         }
     }
 
@@ -5264,8 +5258,7 @@ fn await_value(cx: &mut Context, value: SteelVal, callback_fn: SteelVal) {
 }
 // Check that we successfully created a directory?
 fn create_directory(path: String) {
-    let path = helix_stdx::path::canonicalize(&PathBuf::from(path));
-
+    let path = helix_stdx::path::canonicalize(&path);
     if !path.exists() {
         std::fs::create_dir(path).unwrap();
     }
