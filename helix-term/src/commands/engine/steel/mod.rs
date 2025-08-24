@@ -5578,28 +5578,25 @@ pub fn add_inlay_hint(
     let view = cx.editor.tree.get(view_id);
     let doc_id = cx.editor.tree.get(view_id).doc;
     let doc = cx.editor.documents.get_mut(&doc_id)?;
-    let mut new_inlay_hints = doc
-        .inlay_hints(view_id)
-        .map(|x| x.clone())
-        .unwrap_or_else(|| {
-            let doc_text = doc.text();
-            let len_lines = doc_text.len_lines();
+    let mut new_inlay_hints = doc.inlay_hints(view_id).cloned().unwrap_or_else(|| {
+        let doc_text = doc.text();
+        let len_lines = doc_text.len_lines();
 
-            let view_height = view.inner_height();
-            let first_visible_line =
-                doc_text.char_to_line(doc.view_offset(view_id).anchor.min(doc_text.len_chars()));
-            let first_line = first_visible_line.saturating_sub(view_height);
-            let last_line = first_visible_line
-                .saturating_add(view_height.saturating_mul(2))
-                .min(len_lines);
+        let view_height = view.inner_height();
+        let first_visible_line =
+            doc_text.char_to_line(doc.view_offset(view_id).anchor.min(doc_text.len_chars()));
+        let first_line = first_visible_line.saturating_sub(view_height);
+        let last_line = first_visible_line
+            .saturating_add(view_height.saturating_mul(2))
+            .min(len_lines);
 
-            let new_doc_inlay_hints_id = DocumentInlayHintsId {
-                first_line,
-                last_line,
-            };
+        let new_doc_inlay_hints_id = DocumentInlayHintsId {
+            first_line,
+            last_line,
+        };
 
-            DocumentInlayHints::empty_with_id(new_doc_inlay_hints_id)
-        });
+        DocumentInlayHints::empty_with_id(new_doc_inlay_hints_id)
+    });
 
     // TODO: The inlay hints should actually instead return the id?
     new_inlay_hints
