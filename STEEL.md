@@ -14,6 +14,12 @@ To install the `hx` executable, with steel as a plugin language. This also inclu
 
 The `steel` executable, the steel language server, the steel dylib installer, and the steel package manager `forge`.
 
+For `nix` users you can add the flake of this repo as an input and override the `enableSteel` argument of the package. For example in home-manager
+
+```nix
+program.helix.package = inputs.helix.packages.${pkgs.system}.helix.override { enableSteel = true; };
+```
+
 ## Developing
 
 The easiest way to contribute would be to adjust the default features on the `helix-term` crate:

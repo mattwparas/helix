@@ -8,6 +8,7 @@
   gitRev ? null,
   grammarOverlays ? [ ],
   includeGrammarIf ? _: true,
+  enableSteel ? false,
 }:
 let
   fs = lib.fileset;
@@ -64,6 +65,8 @@ rustPlatform.buildRustPackage (self: {
 
   # Helix attempts to reach out to the network and get the grammars. Nix doesn't allow this.
   HELIX_DISABLE_AUTO_GRAMMAR_BUILD = "1";
+
+  buildFeatures = [ ] ++ lib.optionals enableSteel [ "steel" ];
 
   # So Helix knows what rev it is.
   HELIX_NIX_BUILD_REV = gitRev;
