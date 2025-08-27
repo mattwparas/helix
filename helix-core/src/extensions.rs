@@ -434,7 +434,7 @@ pub mod steel_implementations {
             r#"Find the first match in a given rope
 
 ```scheme
-(rope-regex->find regex rope) -> Rope?
+(rope-regex-find regex rope) -> Rope?
 ```
 
 * regex: RopeRegex?
