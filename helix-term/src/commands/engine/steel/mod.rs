@@ -53,7 +53,7 @@ use std::{
     error::Error,
     io::Write,
     path::PathBuf,
-    sync::{atomic::AtomicBool, Mutex, MutexGuard, RwLock, RwLockReadGuard},
+    sync::{atomic::AtomicBool, Mutex, MutexGuard, RwLock, RwLockReadGuard, Weak},
     time::{Duration, SystemTime},
 };
 use std::{str::FromStr as _, sync::Arc};
@@ -5704,17 +5704,11 @@ fn move_window_to_the_right(cx: &mut Context) {
 }
 
 #[derive(Debug, Clone)]
-struct LspClient {
-    name: String,
-    offset_encoding: helix_lsp::OffsetEncoding,
-}
+struct LspClient(Weak<helix_lsp::Client>);
 
 impl LspClient {
-    fn new(client: &helix_lsp::Client) -> Self {
-        LspClient {
-            name: client.name().to_owned(),
-            offset_encoding: client.offset_encoding(),
-        }
+    fn new(client: Arc<helix_lsp::Client>) -> Self {
+        LspClient(Arc::downgrade(&client))
     }
 }
 
@@ -5723,22 +5717,24 @@ impl Custom for LspClient {}
 fn get_active_lsp_clients(cx: &mut Context) -> SteelVal {
     let (_, doc) = current!(cx.editor);
     SteelVal::ListV(
-        doc.language_servers()
+        doc.arc_language_servers()
             .map(|client| LspClient::new(client).into_steelval().unwrap())
             .collect(),
     )
 }
 
-fn lsp_client_name(client: LspClient) -> String {
-    client.name.clone()
+fn lsp_client_name(client: LspClient) -> Option<String> {
+    let client = client.0.upgrade();
+    client.map(|client| client.name().to_owned())
 }
 
-fn lsp_client_offset_encoding(client: LspClient) -> &'static str {
-    match client.offset_encoding {
+fn lsp_client_offset_encoding(client: LspClient) -> Option<&'static str> {
+    let client = client.0.upgrade();
+    client.map(|client| match client.offset_encoding() {
         helix_lsp::OffsetEncoding::Utf8 => "utf-8",
         helix_lsp::OffsetEncoding::Utf16 => "utf-16",
         helix_lsp::OffsetEncoding::Utf32 => "utf-32",
-    }
+    })
 }
 
 fn send_arbitrary_lsp_command(
