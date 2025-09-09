@@ -1831,6 +1831,7 @@ impl Document {
             .unwrap_or_else(|| self.config.load().path_completion)
     }
 
+    #[cfg(feature = "steel")]
     pub fn arc_language_servers(&self) -> impl Iterator<Item = Arc<helix_lsp::Client>> + use<'_> {
         self.language_config().into_iter().flat_map(move |config| {
             config.language_servers.iter().filter_map(move |features| {
