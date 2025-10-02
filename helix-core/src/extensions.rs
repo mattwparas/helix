@@ -3,6 +3,8 @@ pub mod steel_implementations {
 
     use std::borrow::Cow;
 
+    use regex_cursor::regex_automata::util::syntax::Config;
+
     use steel::{
         gc::ShareableMut,
         rvals::{as_underlying_type, AsRefSteelVal, Custom, SteelString},
@@ -13,7 +15,7 @@ pub mod steel_implementations {
         SteelVal,
     };
 
-    use helix_stdx::rope::RopeSliceExt;
+    use helix_stdx::rope::{Regex, RegexBuilder, RopeSliceExt};
 
     use crate::{
         syntax::config::{AutoPairConfig, SoftWrap},
@@ -24,6 +26,101 @@ pub mod steel_implementations {
     impl steel::rvals::Custom for crate::Selection {}
     impl steel::rvals::Custom for AutoPairConfig {}
     impl steel::rvals::Custom for SoftWrap {}
+
+    struct SteelRopeRegex(Regex);
+
+    #[allow(unused)]
+    #[derive(Debug)]
+    struct RegexError(String);
+
+    impl steel::rvals::Custom for SteelRopeRegex {}
+
+    impl steel::rvals::Custom for RegexError {
+        fn fmt(&self) -> Option<std::result::Result<String, std::fmt::Error>> {
+            Some(Ok(format!("{:?}", self.0)))
+        }
+    }
+
+    impl From<String> for RegexError {
+        fn from(value: String) -> Self {
+            Self(value)
+        }
+    }
+
+    impl SteelRopeRegex {
+        fn new(re: SteelString) -> Result<Self, RegexError> {
+            match RegexBuilder::new().syntax(Config::new()).build(re.as_str()) {
+                Ok(regex) => Ok(SteelRopeRegex(regex)),
+                Err(err) => Err(RegexError(err.to_string())),
+            }
+        }
+
+        fn is_match(&self, haystack: SteelRopeSlice) -> bool {
+            match self.0.find(haystack.to_slice().regex_input()) {
+                Some(m) => m.start() != m.end(),
+                None => false,
+            }
+        }
+
+        fn find(&self, haystack: SteelRopeSlice) -> Option<SteelRopeSlice> {
+            match self.0.find(haystack.to_slice().regex_input()) {
+                Some(m) => {
+                    if m.start() == m.end() {
+                        None
+                    } else {
+                        haystack.slice(m.start(), m.end()).ok()
+                    }
+                }
+                None => None,
+            }
+        }
+
+        pub fn find_all(&self, haystack: SteelRopeSlice) -> Option<Vec<SteelRopeSlice>> {
+            let matches = self.0.find_iter(haystack.to_slice().regex_input());
+            let mut ret: Vec<SteelRopeSlice> = vec![];
+            for m in matches {
+                if m.start() == m.end() {
+                    continue;
+                }
+                let s = haystack.clone().slice(m.start(), m.end());
+                if let Ok(slice) = s {
+                    ret.push(slice);
+                }
+            }
+            Some(ret)
+        }
+
+        pub fn split(&self, haystack: SteelRopeSlice) -> Option<Vec<SteelRopeSlice>> {
+            let matches = self.0.split(haystack.to_slice().regex_input());
+            let mut ret: Vec<SteelRopeSlice> = vec![];
+            for m in matches {
+                if m.start == m.end {
+                    continue;
+                }
+                let s = haystack.clone().slice(m.start, m.end);
+                if let Ok(slice) = s {
+                    ret.push(slice);
+                }
+            }
+            Some(ret)
+        }
+
+        pub fn splitn(&self, haystack: SteelRopeSlice, n: usize) -> Option<Vec<SteelRopeSlice>> {
+            let matches = self.0.splitn(haystack.to_slice().regex_input(), n);
+            let mut ret: Vec<SteelRopeSlice> = vec![];
+            for m in matches {
+                if m.start == m.end {
+                    continue;
+                }
+                let s = haystack.clone().slice(m.start, m.end);
+                if let Ok(slice) = s {
+                    ret.push(slice);
+                }
+            }
+            Some(ret)
+        }
+    }
+
     impl steel::rvals::Custom for Range {}
 
     #[allow(unused)]
@@ -64,7 +161,7 @@ pub mod steel_implementations {
         fn equality_hint_general(&self, other: &steel::SteelVal) -> bool {
             match other {
                 SteelVal::StringV(s) => self.to_slice() == s.as_str(),
-                SteelVal::Custom(c) => Self::equality_hint(&self, c.read().as_ref()),
+                SteelVal::Custom(c) => Self::equality_hint(self, c.read().as_ref()),
 
                 _ => false,
             }
@@ -135,9 +232,9 @@ pub mod steel_implementations {
         pub fn line(mut self, cursor: usize) -> Result<Self, RopeyError> {
             match self.kind {
                 RangeKind::Char => {
-                    let slice = self.text.get_slice(self.start..self.end).ok_or_else(|| {
-                        RopeyError(ropey::Error::CharIndexOutOfBounds(self.start, self.end))
-                    })?;
+                    let slice = self.text.get_slice(self.start..self.end).ok_or(RopeyError(
+                        ropey::Error::CharIndexOutOfBounds(self.start, self.end),
+                    ))?;
 
                     // Move the start range, to wherever this lines up
                     let index = slice.try_line_to_char(cursor)?;
@@ -153,9 +250,9 @@ pub mod steel_implementations {
                     let slice =
                         self.text
                             .get_byte_slice(self.start..self.end)
-                            .ok_or_else(|| {
-                                RopeyError(ropey::Error::ByteIndexOutOfBounds(self.start, self.end))
-                            })?;
+                            .ok_or(RopeyError(ropey::Error::ByteIndexOutOfBounds(
+                                self.start, self.end,
+                            )))?;
 
                     // Move the start range, to wherever this lines up
                     let index = slice.try_line_to_byte(cursor)?;
@@ -176,9 +273,9 @@ pub mod steel_implementations {
                     self.start += lower;
 
                     // Just check that this is legal
-                    self.text.get_slice(self.start..self.end).ok_or_else(|| {
-                        RopeyError(ropey::Error::CharIndexOutOfBounds(self.start, self.end))
-                    })?;
+                    self.text.get_slice(self.start..self.end).ok_or(RopeyError(
+                        ropey::Error::CharIndexOutOfBounds(self.start, self.end),
+                    ))?;
 
                     Ok(self)
                 }
@@ -188,9 +285,9 @@ pub mod steel_implementations {
 
                     self.text
                         .get_byte_slice(self.start..self.end)
-                        .ok_or_else(|| {
-                            RopeyError(ropey::Error::ByteIndexOutOfBounds(self.start, self.end))
-                        })?;
+                        .ok_or(RopeyError(ropey::Error::ByteIndexOutOfBounds(
+                            self.start, self.end,
+                        )))?;
 
                     self.kind = RangeKind::Char;
                     Ok(self)
@@ -206,9 +303,9 @@ pub mod steel_implementations {
                     self.kind = RangeKind::Byte;
 
                     // Just check that this is legal
-                    self.text.get_slice(self.start..self.end).ok_or_else(|| {
-                        RopeyError(ropey::Error::CharIndexOutOfBounds(self.start, self.end))
-                    })?;
+                    self.text.get_slice(self.start..self.end).ok_or(RopeyError(
+                        ropey::Error::CharIndexOutOfBounds(self.start, self.end),
+                    ))?;
 
                     Ok(self)
                 }
@@ -218,9 +315,9 @@ pub mod steel_implementations {
 
                     self.text
                         .get_byte_slice(self.start..self.end)
-                        .ok_or_else(|| {
-                            RopeyError(ropey::Error::ByteIndexOutOfBounds(self.start, self.end))
-                        })?;
+                        .ok_or(RopeyError(ropey::Error::ByteIndexOutOfBounds(
+                            self.start, self.end,
+                        )))?;
 
                     Ok(self)
                 }
@@ -312,6 +409,89 @@ pub mod steel_implementations {
 
 * value : string?
             "#
+        );
+
+        register_value!(
+            "RopeRegex?",
+            |value: SteelVal| SteelRopeRegex::as_ref(&value).is_ok(),
+            "Check if the given value is a rope regex"
+        );
+        register_value!(
+            "rope-regex",
+            SteelRopeRegex::new,
+            r#"Build a new RopeRegex? with a string
+
+```scheme
+(rope-regex string) -> RopeRegex?
+```
+
+* string: string?
+            "#
+        );
+        register_value!(
+            "rope-regex-find",
+            SteelRopeRegex::find,
+            r#"Find the first match in a given rope
+
+```scheme
+(rope-regex-find regex rope) -> Rope?
+```
+
+* regex: RopeRegex?
+* rope: Rope?
+            "#
+        );
+        register_value!(
+            "rope-regex-match?",
+            SteelRopeRegex::is_match,
+            r#"Returns if a regex is matching on a given rope
+
+```scheme
+(rope-regex->match? regex rope) -> bool?
+```
+
+* regex: RopeRegex?
+* rope: Rope?
+            "#
+        );
+        register_value!(
+            "rope-regex-find*",
+            SteelRopeRegex::find_all,
+            r#"Find and return all matches in a given rope
+
+```scheme
+(rope-regex-find* regex rope) -> '(Rope?)
+```
+* regex: RopeRegex?
+* rope: Rope?
+            "#
+        );
+        register_value!(
+            "rope-regex-split",
+            SteelRopeRegex::split,
+            r#"Split on the match in a given rope
+
+```scheme
+(rope-regex-split regex rope) -> '(Rope?)
+```
+
+* regex: RopeRegex?
+* rope: Rope?
+"#
+        );
+        register_value!(
+            "rope-regex-splitn",
+            SteelRopeRegex::splitn,
+            r#"Split n times on the match in a given rope, return the rest
+
+```scheme
+(rope-regex-splitn regex rope n) -> '(Rope?)
+```
+
+* regex: RopeRegex?
+* rope: Rope?
+* n: (and positive? int?)
+"#
         );
 
         register_value!(
