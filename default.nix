@@ -6,82 +6,90 @@
   installShellFiles,
   git,
   gitRev ? null,
-  grammarOverlays ? [],
+  grammarOverlays ? [ ],
   includeGrammarIf ? _: true,
-}: let
+  enableSteel ? false,
+}:
+let
   fs = lib.fileset;
 
-  src = fs.difference (fs.gitTracked ./.) (fs.unions [
-    ./.envrc
-    ./rustfmt.toml
-    ./screenshot.png
-    ./book
-    ./docs
-    ./runtime
-    ./flake.lock
-    (fs.fileFilter (file: lib.strings.hasInfix ".git" file.name) ./.)
-    (fs.fileFilter (file: file.hasExt "svg") ./.)
-    (fs.fileFilter (file: file.hasExt "md") ./.)
-    (fs.fileFilter (file: file.hasExt "nix") ./.)
-  ]);
+  src = fs.difference (fs.gitTracked ./.) (
+    fs.unions [
+      ./.envrc
+      ./rustfmt.toml
+      ./screenshot.png
+      ./book
+      ./docs
+      ./runtime
+      ./flake.lock
+      (fs.fileFilter (file: lib.strings.hasInfix ".git" file.name) ./.)
+      (fs.fileFilter (file: file.hasExt "svg") ./.)
+      (fs.fileFilter (file: file.hasExt "md") ./.)
+      (fs.fileFilter (file: file.hasExt "nix") ./.)
+    ]
+  );
 
   # Next we actually need to build the grammars and the runtime directory
   # that they reside in. It is built by calling the derivation in the
   # grammars.nix file, then taking the runtime directory in the git repo
   # and hooking symlinks up to it.
-  grammars = callPackage ./grammars.nix {inherit grammarOverlays includeGrammarIf;};
-  runtimeDir = runCommand "helix-runtime" {} ''
+  grammars = callPackage ./grammars.nix { inherit grammarOverlays includeGrammarIf; };
+  runtimeDir = runCommand "helix-runtime" { } ''
     mkdir -p $out
     ln -s ${./runtime}/* $out
     rm -r $out/grammars
     ln -s ${grammars} $out/grammars
   '';
 in
-  rustPlatform.buildRustPackage (self: {
-    cargoLock = {
-      lockFile = ./Cargo.lock;
-      # This is not allowed in nixpkgs but is very convenient here: it allows us to
-      # avoid specifying `outputHashes` here for any git dependencies we might take
-      # on temporarily.
-      allowBuiltinFetchGit = true;
-    };
+rustPlatform.buildRustPackage (self: {
+  cargoLock = {
+    lockFile = ./Cargo.lock;
+    # This is not allowed in nixpkgs but is very convenient here: it allows us to
+    # avoid specifying `outputHashes` here for any git dependencies we might take
+    # on temporarily.
+    allowBuiltinFetchGit = true;
+  };
 
-    propagatedBuildInputs = [ runtimeDir ];
+
+  propagatedBuildInputs = [ runtimeDir ];
     
-    nativeBuildInputs = [
-      installShellFiles
-      git
-    ];
+  nativeBuildInputs = [
+    installShellFiles
+    git
+  ];
 
-    buildType = "release";
 
-    name = with builtins; (fromTOML (readFile ./helix-term/Cargo.toml)).package.name;
-    src = fs.toSource {
-      root = ./.;
-      fileset = src;
-    };
+  buildType = "release";
 
-    # Helix attempts to reach out to the network and get the grammars. Nix doesn't allow this.
-    HELIX_DISABLE_AUTO_GRAMMAR_BUILD = "1";
+  name = with builtins; (fromTOML (readFile ./helix-term/Cargo.toml)).package.name;
+  src = fs.toSource {
+    root = ./.;
+    fileset = src;
+  };
 
-    # So Helix knows what rev it is.
-    HELIX_NIX_BUILD_REV = gitRev;
+  # Helix attempts to reach out to the network and get the grammars. Nix doesn't allow this.
+  HELIX_DISABLE_AUTO_GRAMMAR_BUILD = "1";
 
-    doCheck = false;
-    strictDeps = true;
+  buildFeatures = lib.optionals enableSteel [ "steel" ];
 
-    # Sets the Helix runtime dir to the grammars
-    env.HELIX_DEFAULT_RUNTIME = "${runtimeDir}";
+  # So Helix knows what rev it is.
+  HELIX_NIX_BUILD_REV = gitRev;
 
-    # Get all the application stuff in the output directory.
-    postInstall = ''
-      mkdir -p $out/lib
-      installShellCompletion ${./contrib/completion}/hx.{bash,fish,zsh}
-      mkdir -p $out/share/{applications,icons/hicolor/{256x256,scalable}/apps}
-      cp ${./contrib/Helix.desktop} $out/share/applications/Helix.desktop
-      cp ${./logo.svg} $out/share/icons/hicolor/scalable/apps/helix.svg
-      cp ${./contrib/helix.png} $out/share/icons/hicolor/256x256/apps/helix.png
-    '';
+  doCheck = false;
+  strictDeps = true;
 
-    meta.mainProgram = "hx";
-  })
+  # Sets the Helix runtime dir to the grammars
+  env.HELIX_DEFAULT_RUNTIME = "${runtimeDir}";
+
+  # Get all the application stuff in the output directory.
+  postInstall = ''
+    mkdir -p $out/lib
+    installShellCompletion ${./contrib/completion}/hx.{bash,fish,zsh}
+    mkdir -p $out/share/{applications,icons/hicolor/{256x256,scalable}/apps}
+    cp ${./contrib/Helix.desktop} $out/share/applications/Helix.desktop
+    cp ${./logo.svg} $out/share/icons/hicolor/scalable/apps/helix.svg
+    cp ${./contrib/helix.png} $out/share/icons/hicolor/256x256/apps/helix.png
+  '';
+
+  meta.mainProgram = "hx";
+})
