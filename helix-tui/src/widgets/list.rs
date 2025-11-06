@@ -6,21 +6,12 @@ use crate::{
 };
 use helix_core::unicode::width::UnicodeWidthStr;
 use helix_view::graphics::{Rect, Style};
-use std::iter::{self, Iterator};
+use std::iter::Iterator;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct ListState {
     offset: usize,
     selected: Option<usize>,
-}
-
-impl Default for ListState {
-    fn default() -> ListState {
-        ListState {
-            offset: 0,
-            selected: None,
-        }
-    }
 }
 
 impl ListState {
@@ -183,9 +174,7 @@ impl<'a> List<'a> {
         state.offset = start;
 
         let highlight_symbol = self.highlight_symbol.unwrap_or("");
-        let blank_symbol = iter::repeat(" ")
-            .take(highlight_symbol.width())
-            .collect::<String>();
+        let blank_symbol = " ".repeat(highlight_symbol.width());
 
         let mut current_height = 0;
         let has_selection = state.selected.is_some();
