@@ -961,7 +961,7 @@ fn load_typed_commands(engine: &mut Engine, generate_sources: bool) {
     module.register_fn("goto-line", goto_line_impl);
 
     builtin_typable_command_module.push_str(
-        &r#"
+        r#"
 (provide goto-column)
 
 ;;@doc
@@ -972,7 +972,7 @@ fn load_typed_commands(engine: &mut Engine, generate_sources: bool) {
     );
 
     builtin_typable_command_module.push_str(
-        &r#"
+        r#"
 (provide goto-line)
 
 ;;@doc
