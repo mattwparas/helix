@@ -3300,7 +3300,7 @@ impl super::PluginSystem for SteelScriptingEngine {
 fn patch_callbacks(ctx: &mut Context<'_>) {
     for callback in std::mem::take(&mut ctx.callback) {
         let callback = async move {
-            let call: Box<dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs)> = Box::new(
+            let call: Box<LocalJobCallback> = Box::new(
                 move |editor: &mut Editor, compositor: &mut Compositor, jobs| {
                     callback(
                         compositor,
@@ -6222,7 +6222,7 @@ fn get_selection(cx: &mut Context) -> String {
 // TODO: Replace with eval-string
 pub fn run_expression_in_engine(cx: &mut Context, text: String) -> anyhow::Result<()> {
     let callback = async move {
-        let call: Box<dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs)> = Box::new(
+        let call: Box<LocalJobCallback> = Box::new(
             move |editor: &mut Editor, compositor: &mut Compositor, jobs: &mut job::Jobs| {
                 let mut ctx = Context {
                     register: None,
@@ -6281,7 +6281,7 @@ pub fn load_buffer(cx: &mut Context) -> anyhow::Result<()> {
     };
 
     let callback = async move {
-        let call: Box<dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs)> = Box::new(
+        let call: Box<LocalJobCallback> = Box::new(
             move |editor: &mut Editor, compositor: &mut Compositor, jobs: &mut job::Jobs| {
                 let mut ctx = Context {
                     register: None,
@@ -6474,7 +6474,7 @@ fn push_component(cx: &mut Context, component: &mut WrappedDynComponent) {
     let inner = component.inner.take().unwrap();
 
     let callback = async move {
-        let call: Box<dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs)> = Box::new(
+        let call: Box<LocalJobCallback> = Box::new(
             move |_editor: &mut Editor, compositor: &mut Compositor, _| compositor.push(inner),
         );
         Ok(call)
@@ -6484,7 +6484,7 @@ fn push_component(cx: &mut Context, component: &mut WrappedDynComponent) {
 
 fn pop_last_component_by_name(cx: &mut Context, name: SteelString) {
     let callback = async move {
-        let call: Box<dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs)> = Box::new(
+        let call: Box<LocalJobCallback> = Box::new(
             move |_editor: &mut Editor, compositor: &mut Compositor, _jobs: &mut job::Jobs| {
                 compositor.remove_by_dynamic_name(&name);
             },
@@ -6557,7 +6557,7 @@ fn enqueue_command(cx: &mut Context, callback_fn: SteelVal) {
     let current_gen = load_generation();
 
     let callback = async move {
-        let call: Box<dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs)> = Box::new(
+        let call: Box<LocalJobCallback> = Box::new(
             move |editor: &mut Editor, _compositor: &mut Compositor, jobs: &mut job::Jobs| {
                 let mut ctx = Context {
                     register: None,
@@ -6608,7 +6608,7 @@ fn enqueue_command_with_delay(cx: &mut Context, delay: SteelVal, callback_fn: St
 
         tokio::time::sleep(tokio::time::Duration::from_millis(delay as u64)).await;
 
-        let call: Box<dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs)> = Box::new(
+        let call: Box<LocalJobCallback> = Box::new(
             move |editor: &mut Editor, _compositor: &mut Compositor, jobs: &mut job::Jobs| {
                 let mut ctx = Context {
                     register: None,
@@ -6661,7 +6661,7 @@ fn await_value(cx: &mut Context, value: SteelVal, callback_fn: SteelVal) {
     let callback = async move {
         let future_value = value.as_future().unwrap().await;
 
-        let call: Box<dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs)> = Box::new(
+        let call: Box<LocalJobCallback> = Box::new(
             move |editor: &mut Editor, _compositor: &mut Compositor, jobs: &mut job::Jobs| {
                 let mut ctx = Context {
                     register: None,
@@ -7006,6 +7006,8 @@ fn lsp_reply_ok(
         })
 }
 
+type LocalJobCallback = dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs);
+
 fn create_callback<T: TryInto<SteelVal, Error = SteelErr> + 'static>(
     cx: &mut Context,
     future: impl std::future::Future<Output = Result<T, helix_lsp::Error>> + 'static,
@@ -7016,7 +7018,7 @@ fn create_callback<T: TryInto<SteelVal, Error = SteelErr> + 'static>(
         // from the lsp call
         let res = future.await?;
 
-        let call: Box<dyn FnOnce(&mut Editor, &mut Compositor, &mut job::Jobs)> = Box::new(
+        let call: Box<LocalJobCallback> = Box::new(
             move |editor: &mut Editor, _compositor: &mut Compositor, jobs: &mut job::Jobs| {
                 let mut ctx = Context {
                     register: None,
