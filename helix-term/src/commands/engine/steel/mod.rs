@@ -2207,7 +2207,7 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
 "#,
         );
 
-        builtin_configuration_module.push_str(&format!(
+        builtin_configuration_module.push_str(
             r#"
 
 (provide whitespace)
@@ -2259,9 +2259,9 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         *helix.config*
         (foldl (lambda (func config) (func config)) (helix.raw-whitespace) args)))
 "#,
-        ));
+        );
 
-        builtin_configuration_module.push_str(&format!(
+        builtin_configuration_module.push_str(
             r#"
 
 (provide indent-guides)
@@ -2294,7 +2294,7 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         *helix.config*
         (foldl (lambda (func config) (func config)) (helix.raw-indent-guides) args)))
 "#,
-        ));
+        );
 
         let mut template_function_arity_1 = |name: &str, doc: &str| {
             let doc = format_docstring(doc);

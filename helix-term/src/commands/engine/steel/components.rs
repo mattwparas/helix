@@ -554,7 +554,7 @@ area : Rect?
         }
     );
 
-    builtin_components_module.push_str(&format!(
+    builtin_components_module.push_str(
         r#"
 (provide render-native-component)
 ;;@doc
@@ -562,7 +562,7 @@ area : Rect?
 (define (render-native-component component area buffer)
     (helix.components.render-native-component component area buffer *helix.cx*))
                     "#,
-    ));
+    );
 
     module.register_fn(
         "markdown-component",
@@ -575,7 +575,7 @@ area : Rect?
         },
     );
 
-    builtin_components_module.push_str(&format!(
+    builtin_components_module.push_str(
         r#"
 (provide markdown-component)
 ;;@doc
@@ -583,7 +583,7 @@ area : Rect?
 (define (markdown-component text)
     (helix.components.markdown-component *helix.cx* text))
                     "#,
-    ));
+    );
 
     register!("overlaid", |component: &mut WrappedDynComponent| {
         let inner: Option<Box<dyn Component + Send + Sync + 'static>> =
