@@ -4210,7 +4210,7 @@ impl HelixConfiguration {
                     _ => anyhow::bail!("Unknown status line element: {}", s),
                 };
 
-                return Ok(value);
+                Ok(value)
             } else {
                 anyhow::bail!("Cannot convert value to status line element: {}", val)
             }
@@ -4218,7 +4218,7 @@ impl HelixConfiguration {
 
         fn steel_list_to_elements(val: &SteelVal) -> anyhow::Result<Vec<StatusLineElement>> {
             if let SteelVal::ListV(l) = val {
-                return l.iter().map(steel_to_elements).collect();
+                l.iter().map(steel_to_elements).collect()
             } else {
                 anyhow::bail!(
                     "Cannot convert value to vec of status line element: {}",
@@ -4237,7 +4237,7 @@ impl HelixConfiguration {
                     _ => anyhow::bail!("Unknown severity label: {}", s),
                 };
 
-                return Ok(value);
+                Ok(value)
             } else {
                 anyhow::bail!("Cannot convert value to severity: {}", val)
             }
@@ -4245,7 +4245,7 @@ impl HelixConfiguration {
 
         fn steel_list_to_severity_vec(val: &SteelVal) -> anyhow::Result<Vec<Severity>> {
             if let SteelVal::ListV(l) = val {
-                return l.iter().map(steel_to_severity).collect();
+                l.iter().map(steel_to_severity).collect()
             } else {
                 anyhow::bail!(
                     "Cannot convert value to vec of status line element: {}",
@@ -5931,7 +5931,7 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
     engine.register_fn("SteelDynamicComponent?", |object: SteelVal| {
         if let SteelVal::Custom(v) = object {
             if let Some(wrapped) = v.read().as_any_ref().downcast_ref::<BoxDynComponent>() {
-                return wrapped.inner.as_any().is::<SteelDynamicComponent>();
+                wrapped.inner.as_any().is::<SteelDynamicComponent>()
             } else {
                 false
             }
@@ -6419,7 +6419,7 @@ fn cx_register_value(cx: &mut Context, name: char) -> Vec<String> {
 }
 
 fn cx_document_exists(cx: &mut Context, doc_id: DocumentId) -> bool {
-    cx.editor.documents.get(&doc_id).is_some()
+    cx.editor.documents.contains_key(&doc_id)
 }
 
 fn document_path(cx: &mut Context, doc_id: DocumentId) -> Option<String> {
