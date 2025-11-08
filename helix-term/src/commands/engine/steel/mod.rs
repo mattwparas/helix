@@ -1304,14 +1304,14 @@ fn load_configuration_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn("sw-wrap-at-text-width", wrap_at_text_width);
 
     module
-        .register_fn("raw-whitespace", || WhitespaceConfig::default())
+        .register_fn("raw-whitespace", WhitespaceConfig::default)
         .register_fn("register-whitespace", HelixConfiguration::whitespace)
         .register_fn("ws-visible", ws_visible)
         .register_fn("ws-chars", ws_chars)
         .register_fn("ws-render", ws_render);
 
     module
-        .register_fn("raw-indent-guides", || IndentGuidesConfig::default())
+        .register_fn("raw-indent-guides", IndentGuidesConfig::default)
         .register_fn("register-indent-guides", HelixConfiguration::indent_guides)
         .register_fn("ig-render", ig_render)
         .register_fn("ig-character", ig_character)
