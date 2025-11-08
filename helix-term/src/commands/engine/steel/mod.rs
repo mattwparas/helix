@@ -1069,12 +1069,12 @@ fn ws_render(config: &mut WhitespaceConfig, option: HashMap<SteelVal, bool>) -> 
 
     let mut base = match config.render {
         WhitespaceRender::Basic(v) => RenderFlags {
-            default: Some(v.clone()),
-            space: Some(v.clone()),
-            nbsp: Some(v.clone()),
-            nnbsp: Some(v.clone()),
-            tab: Some(v.clone()),
-            newline: Some(v.clone()),
+            default: Some(v),
+            space: Some(v),
+            nbsp: Some(v),
+            nnbsp: Some(v),
+            tab: Some(v),
+            newline: Some(v),
         },
         WhitespaceRender::Specific { .. } => RenderFlags::default(),
     };
