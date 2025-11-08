@@ -2086,10 +2086,7 @@ impl Component for SteelDynamicComponent {
                                 compositor.pop();
                             })),
                         ),
-                        _ => match event {
-                            // ctrl!('c') | key!(Esc) => close_fn,
-                            _ => compositor::EventResult::Ignored(None),
-                        },
+                        _ => compositor::EventResult::Ignored(None),
                     }
                 }
                 Err(e) => {
