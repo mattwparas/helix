@@ -122,7 +122,7 @@ impl<'a> List<'a> {
     }
 }
 
-impl<'a> List<'a> {
+impl List<'_> {
     fn render_list(mut self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
         buf.set_style(area, self.style);
         let list_area = match self.block.take() {
@@ -228,7 +228,7 @@ impl<'a> List<'a> {
     }
 }
 
-impl<'a> Widget for List<'a> {
+impl Widget for List<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut state = ListState::default();
         Self::render_list(self, area, buf, &mut state);

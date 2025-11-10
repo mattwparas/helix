@@ -4551,7 +4551,7 @@ fn run_initialization_script(
 
 impl Custom for PromptEvent {}
 
-impl<'a> CustomReference for Context<'a> {}
+impl CustomReference for Context<'_> {}
 
 steel::custom_reference!(Context<'a>);
 
@@ -6782,7 +6782,7 @@ pub fn custom_insert_newline(cx: &mut Context, indent: String) {
                 let on_auto_pair = doc
                     .auto_pairs(cx.editor, loader, view)
                     .and_then(|pairs| pairs.get(prev))
-                    .map_or(false, |pair| pair.open == prev && pair.close == curr);
+                    .is_some_and(|pair| pair.open == prev && pair.close == curr);
 
                 let local_offs = if on_auto_pair {
                     let inner_indent = indent.clone() + doc.indent_style.as_str();
