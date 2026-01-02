@@ -1,120 +1,42 @@
+# .github/workflows/build.yml
 name: build-artifacts
 
 on:
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: "Log level"
+        required: true
+        default: "warning"
+        type: choice
+        options:
+          - info
+          - warning
+          - debug
+      buildHelix:
+        description: "Build Helix (steel-event-system)"
+        required: true
+        default: true
+        type: boolean
+      buildNreplHx:
+        description: "Build nrepl.hx"
+        required: true
+        default: true
+        type: boolean
   push:
     branches: [ main ]
   pull_request:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-        # add macos-latest later if you need it
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: full
-      # helpful if a build step panics
       RUSTFLAGS: "-C debuginfo=1"
-
-    steps:
-      - name: Checkout your repo
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: System info
-        run: |
-          uname -a
-          rustc -Vv
-          cargo -V
-          df -h
-          free -h || true
-
-      # ----------------------------
-      # Build Helix (Steel fork)
-      # ----------------------------
-      - name: Clone Helix (steel-event-system)
-        run: |
-          git clone --depth 1 --branch steel-event-system https://github.com/mattwparas/helix.git helix
-
-      - name: Build Helix (steel) (verbose)
-        working-directory: helix
-        run: |
-          # xtask will build hx and assemble runtime bits
-          cargo xtask steel -vv
-
-      - name: Package Helix artifact
-        shell: bash
-        run: |
-          set -euxo pipefail
-          mkdir -p dist/helix
-          # hx binary
-          if [ -f helix/target/release/hx ]; then
-            cp helix/target/release/hx dist/helix/
-          else
-            # fallback: locate binary
-            find helix/target -type f -name hx -maxdepth 4 -print -exec cp {} dist/helix/ \;
-          fi
-
-          # runtime dir is required for Helix
-          if [ -d helix/runtime ]; then
-            cp -r helix/runtime dist/helix/
-          fi
-
-          tar -czf helix-steel-${{ runner.os }}.tar.gz -C dist helix
-
-      - name: Upload Helix artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: helix-steel-${{ runner.os }}
-          path: helix-steel-${{ runner.os }}.tar.gz
-
-      # ----------------------------
-      # Build nrepl.hx (from your ZIP contents in repo)
-      # ----------------------------
-      - name: Ensure nrepl.hx source present
-        run: |
-          # If your repo contains the extracted folder already, this does nothing.
-          # If you committed the ZIP, extract it.
-          if [ -f nrepl.hx-main.zip ] && [ ! -d nrepl.hx-main ]; then
-            unzip -q nrepl.hx-main.zip
-          fi
-          test -d nrepl.hx-main
-
-      - name: Build nrepl.hx (verbose)
-        working-directory: nrepl.hx-main
-        run: |
-          cargo build --release -vv
-
-      - name: Package nrepl.hx artifact (portable bundle)
-        shell: bash
-        run: |
-          set -euxo pipefail
-          mkdir -p dist/nrepl.hx
-          # include install script + scheme + adapters + built native outputs
-          cp -r nrepl.hx-main/install.sh dist/nrepl.hx/ || true
-          cp -r nrepl.hx-main/nrepl.scm dist/nrepl.hx/ || true
-          cp -r nrepl.hx-main/cogs dist/nrepl.hx/ || true
-
-          mkdir -p dist/nrepl.hx/target-release
-          # include everything produced in target/release (lib/bin names vary)
-          if [ -d nrepl.hx-main/target/release ]; then
-            cp -r nrepl.hx-main/target/release/* dist/nrepl.hx/target-release/ || true
-          fi
-
-          tar -czf nrepl.hx-${{ runner.os }}.tar.gz -C dist nrepl.hx
-
-      - name: Upload nrepl.hx artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nrepl.hx-${{ runner.os }}
-          path: nrepl.hx-${{ runner.os }}.tar.gz
-
+      # workflow_dispatch inputs exist only for manual runs; fall back for push/PR
+      LOG_LEVEL: ${{ github.event.inputs.logLevel || 'warning' }}
+      BUILD_HELIX: ${{ github.event.inputs.buildHelix || 'true' }}
+      BUILD_NREPL_HX: ${{ github.event.inputs

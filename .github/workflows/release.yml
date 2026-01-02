@@ -1,6 +1,33 @@
+# .github/workflows/release.yml
 name: release
 
 on:
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: "Log level"
+        required: true
+        default: "warning"
+        type: choice
+        options:
+          - info
+          - warning
+          - debug
+      buildHelix:
+        description: "Build Helix (steel-event-system)"
+        required: true
+        default: true
+        type: boolean
+      buildNreplHx:
+        description: "Build nrepl.hx"
+        required: true
+        default: true
+        type: boolean
+      publishRelease:
+        description: "Publish a GitHub Release (uploads assets)"
+        required: true
+        default: false
+        type: boolean
   push:
     tags:
       - "v*"
@@ -9,34 +36,61 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  build-and-maybe-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: full
       RUSTFLAGS: "-C debuginfo=1"
+      LOG_LEVEL: ${{ github.event.inputs.logLevel || 'warning' }}
+      BUILD_HELIX: ${{ github.event.inputs.buildHelix || 'true' }}
+      BUILD_NREPL_HX: ${{ github.event.inputs.buildNreplHx || 'true' }}
+      # On tag pushes, always publish; on manual runs, respect publishRelease input.
+      SHOULD_PUBLISH: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event.inputs.publishRelease == 'true') }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
+      - name: Install unzip
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - name: System info
+        run: |
+          uname -a
+          rustc -Vv
+          cargo -V
+          df -h
+          free -h || true
+
+      # ----------------------------
+      # Build Helix (Steel fork)
+      # ----------------------------
       - name: Clone Helix (steel-event-system)
+        if: ${{ env.BUILD_HELIX == 'true' }}
         run: |
           git clone --depth 1 --branch steel-event-system https://github.com/mattwparas/helix.git helix
 
-      - name: Build Helix (steel) (verbose)
+      - name: Build Helix (steel)
+        if: ${{ env.BUILD_HELIX == 'true' }}
         working-directory: helix
-        run: cargo xtask steel -vv
+        run: |
+          if [ "${LOG_LEVEL}" = "debug" ]; then
+            cargo xtask steel -vv
+          else
+            cargo xtask steel
+          fi
 
-      - name: Package Helix
+      - name: Package Helix asset
+        if: ${{ env.BUILD_HELIX == 'true' }}
         shell: bash
         run: |
           set -euxo pipefail
@@ -45,18 +99,31 @@ jobs:
           cp -r helix/runtime dist/helix/
           tar -czf helix-steel-${{ runner.os }}.tar.gz -C dist helix
 
-      - name: Prep nrepl.hx source
+      # ----------------------------
+      # Build nrepl.hx
+      # ----------------------------
+      - name: Ensure nrepl.hx source present
+        if: ${{ env.BUILD_NREPL_HX == 'true' }}
+        shell: bash
         run: |
+          set -euo pipefail
           if [ -f nrepl.hx-main.zip ] && [ ! -d nrepl.hx-main ]; then
             unzip -q nrepl.hx-main.zip
           fi
           test -d nrepl.hx-main
 
       - name: Build nrepl.hx
+        if: ${{ env.BUILD_NREPL_HX == 'true' }}
         working-directory: nrepl.hx-main
-        run: cargo build --release -vv
+        run: |
+          if [ "${LOG_LEVEL}" = "debug" ]; then
+            cargo build --release -vv
+          else
+            cargo build --release
+          fi
 
-      - name: Package nrepl.hx
+      - name: Package nrepl.hx asset
+        if: ${{ env.BUILD_NREPL_HX == 'true' }}
         shell: bash
         run: |
           set -euxo pipefail
@@ -67,10 +134,20 @@ jobs:
           cp -r nrepl.hx-main/target/release/* dist/nrepl.hx/target-release/ || true
           tar -czf nrepl.hx-${{ runner.os }}.tar.gz -C dist nrepl.hx
 
-      - name: Publish Release assets
+      # Always upload build outputs as run artifacts
+      - name: Upload assets as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ runner.os }}
+          path: |
+            helix-steel-${{ runner.os }}.tar.gz
+            nrepl.hx-${{ runner.os }}.tar.gz
+
+      # Publish to GitHub Releases only when SHOULD_PUBLISH is true
+      - name: Publish GitHub Release assets
+        if: ${{ env.SHOULD_PUBLISH == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           files: |
             helix-steel-${{ runner.os }}.tar.gz
             nrepl.hx-${{ runner.os }}.tar.gz
-
