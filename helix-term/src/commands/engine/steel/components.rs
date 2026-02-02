@@ -1969,7 +1969,7 @@ impl Component for SteelDynamicComponent {
             )
         };
 
-        let res = enter_engine(|guard| {
+        enter_engine(|guard| {
             if let Err(e) = guard
                 .with_mut_reference::<tui::buffer::Buffer, tui::buffer::Buffer>(frame)
                 .with_mut_reference::<Context, Context>(&mut ctx)
@@ -1997,8 +1997,6 @@ impl Component for SteelDynamicComponent {
         });
 
         super::patch_callbacks(&mut ctx);
-
-        res
     }
 
     // TODO: Pass in event as well? Need to have immutable reference type

@@ -4757,7 +4757,7 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
                         on_next_key_callback: None,
                         jobs,
                     };
-                    let res = enter_engine(|guard| {
+                    enter_engine(|guard| {
                         if !is_current_generation(generation) {
                             return;
                         }
@@ -4781,8 +4781,6 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
                     });
 
                     patch_callbacks(&mut ctx);
-
-                    res
                 };
                 job::dispatch_blocking_jobs(callback);
 
@@ -4811,7 +4809,7 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
                         on_next_key_callback: None,
                         jobs,
                     };
-                    let res = enter_engine(|guard| {
+                    enter_engine(|guard| {
                         if !is_current_generation(generation) {
                             return;
                         }
@@ -4834,8 +4832,6 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
                     });
 
                     patch_callbacks(&mut ctx);
-
-                    res
                 };
                 job::dispatch_blocking_jobs(callback);
 
@@ -4863,7 +4859,7 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
                         on_next_key_callback: None,
                         jobs,
                     };
-                    let res = enter_engine(|guard| {
+                    enter_engine(|guard| {
                         if !is_current_generation(generation) {
                             return;
                         }
@@ -4886,8 +4882,6 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
                     });
 
                     patch_callbacks(&mut ctx);
-
-                    res
                 };
                 job::dispatch_blocking_jobs(callback);
 
@@ -4915,7 +4909,7 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
                         on_next_key_callback: None,
                         jobs,
                     };
-                    let res = enter_engine(|guard| {
+                    enter_engine(|guard| {
                         if !is_current_generation(generation) {
                             return;
                         }
@@ -4938,8 +4932,6 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
                     });
 
                     patch_callbacks(&mut ctx);
-
-                    res
                 };
                 job::dispatch_blocking_jobs(callback);
 
@@ -5754,7 +5746,7 @@ fn acquire_context_lock(
         let cloned_func = rooted.value();
         let cloned_place = rooted_place.as_ref().map(|x| x.value());
 
-        let res = enter_engine(|guard| {
+        enter_engine(|guard| {
             if let Err(e) = guard
                 .with_mut_reference::<Context, Context>(&mut ctx)
                 // Block until the other thread is finished in its critical
@@ -5803,8 +5795,6 @@ fn acquire_context_lock(
         });
 
         patch_callbacks(&mut ctx);
-
-        res
     };
     job::dispatch_blocking_jobs(callback);
 
@@ -5967,7 +5957,7 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
 
                     let cloned_func = callback_fn_guard.value();
 
-                    let res = with_interrupt_handler(|| {
+                    with_interrupt_handler(|| {
                         enter_engine(|guard| {
                             if let Err(e) = guard
                                 .with_mut_reference::<Context, Context>(&mut ctx)
@@ -5988,8 +5978,6 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
                     });
 
                     patch_callbacks(&mut ctx);
-
-                    res
                 },
             );
 
@@ -6076,7 +6064,7 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
 
                         let cloned_func = rooted.value();
 
-                        let res = enter_engine(|guard| {
+                        enter_engine(|guard| {
                             if let Err(e) = guard
                                 .with_mut_reference::<Context, Context>(&mut ctx)
                                 .consume(move |engine, args| {
@@ -6090,8 +6078,6 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
                         });
 
                         patch_callbacks(&mut ctx);
-
-                        res
                     }
                 }
             })
@@ -6570,7 +6556,7 @@ fn enqueue_command(cx: &mut Context, callback_fn: SteelVal) {
 
                 let cloned_func = rooted.value();
 
-                let res = enter_engine(|guard| {
+                enter_engine(|guard| {
                     if !is_current_generation(current_gen) {
                         return;
                     }
@@ -6589,8 +6575,6 @@ fn enqueue_command(cx: &mut Context, callback_fn: SteelVal) {
                 });
 
                 patch_callbacks(&mut ctx);
-
-                res
             },
         );
         Ok(call)
@@ -6621,7 +6605,7 @@ fn enqueue_command_with_delay(cx: &mut Context, delay: SteelVal, callback_fn: St
 
                 let cloned_func = rooted.value();
 
-                let res = enter_engine(|guard| {
+                enter_engine(|guard| {
                     if !is_current_generation(current_gen) {
                         return;
                     }
@@ -6640,8 +6624,6 @@ fn enqueue_command_with_delay(cx: &mut Context, delay: SteelVal, callback_fn: St
                 });
 
                 patch_callbacks(&mut ctx);
-
-                res
             },
         );
         Ok(call)
@@ -6682,7 +6664,7 @@ fn await_value(cx: &mut Context, value: SteelVal, callback_fn: SteelVal) {
                             engine.call_function_with_args(cloned_func.clone(), vec![inner])
                         };
 
-                        let res = enter_engine(|guard| {
+                        enter_engine(|guard| {
                             if !is_current_generation(current_gen) {
                                 return;
                             }
@@ -6696,8 +6678,6 @@ fn await_value(cx: &mut Context, value: SteelVal, callback_fn: SteelVal) {
                         });
 
                         patch_callbacks(&mut ctx);
-
-                        res
                     }
                     Err(e) => enter_engine(|x| present_error_inside_engine_context(&mut ctx, x, e)),
                 }
