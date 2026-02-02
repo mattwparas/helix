@@ -745,7 +745,9 @@ block: Block?
         |buffer: &mut Buffer, area: Rect| {
             for x in area.left()..area.right() {
                 for y in area.top()..area.bottom() {
-                    buffer.get_mut(x, y).map(|x| x.reset());
+                    if let Some(cell) = buffer.get_mut(x, y) {
+                        cell.reset()
+                    };
                 }
             }
         },
