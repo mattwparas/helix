@@ -106,7 +106,11 @@ pub mod steel_implementations {
             }
         }
 
-        pub fn load(&self, lang: &SteelVal) -> Result<Option<TreeSitterQuery>, SteelErr> {
+        pub fn load(
+            &self,
+            lang: Language,
+            loader: &syntax::Loader,
+        ) -> Result<Option<TreeSitterQuery>, SteelErr> {
             let fun = self.fun.clone();
             let SteelVal::BoxedFunction(func) = &fun else {
                 return Err(SteelErr::new(
@@ -115,7 +119,11 @@ pub mod steel_implementations {
                 ));
             };
 
-            let val = match (func.function)(&vec![lang.clone()]) {
+            let language_str = SteelVal::StringV(SteelString::from(
+                loader.language(lang).config().language_id.clone(),
+            ));
+
+            let val = match (func.function)(&vec![language_str]) {
                 Ok(f) => f,
                 Err(e) => return Err(e),
             };
@@ -193,31 +201,27 @@ pub mod steel_implementations {
             upper: u32,
         ) -> Result<TreeSitterMatch, SteelErr> {
             let mut query_map = BTreeMap::new();
-            for layer in syn.layers_for_byte_range(lower, upper) {
+
+            for layer in syn.layers() {
                 let lang = syn.layer(layer).language;
-                let val = SteelVal::StringV(SteelString::from(
-                    loader.language(lang).config().language_id.clone(),
-                ));
-                let loaded = match query_loader.load(&val) {
-                    Ok(l) => l,
+                match query_loader.load(lang, loader) {
+                    Ok(Some(loaded)) => query_map.insert(lang, loaded),
+                    Ok(None) => continue,
                     Err(e) => return Err(e),
                 };
-
-                if loaded.is_some() {
-                    query_map.insert(lang, loaded.unwrap());
-                }
             }
             let mut captures: BTreeMap<String, Vec<TreeSitterNode>> = BTreeMap::new();
             let mut layers: Vec<(Layer, TreeSitterTree)> = vec![];
             let load = |lang| {
-                return query_map.get(&lang).map(|q| q.get_inner().as_ref());
+                return query_map.get(&lang).map(|e| e.get_inner().as_ref());
             };
 
-            for event in syn.query_iter::<_, (), _>(source, load, lower..upper) {
+            let mut iter = syn.query_iter::<_, (), _>(source, load, lower..upper);
+            while let Some(event) = iter.next() {
                 let QueryIterEvent::Match(m) = event else {
                     continue;
                 };
-                let layer = syn.layer_for_byte_range(m.node.start_byte(), m.node.end_byte());
+                let layer = iter.current_layer();
                 let lang = syn.layer(layer).language;
 
                 let tree = match layers.iter().position(|(l, _)| l == &layer) {
