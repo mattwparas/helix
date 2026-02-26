@@ -38,7 +38,7 @@ package.helix-tui.opt-level = 2
 package.helix-term.opt-level = 2
 
 [workspace.dependencies]
-tree-house = { version = "0.3.0", default-features = false }
+tree-house = { git = "https://github.com/gerblesh/tree-house.git", branch = "layers-iterator", default-features = false} # waiting on: https://github.com/helix-editor/tree-house/pull/34
 nucleo = "0.5.0"
 steel-core = { git = "https://github.com/mattwparas/steel.git", version = "0.8.2", features = ["anyhow", "dylibs", "sync", "biased", "imbl"] }
 slotmap = "1.1.1"
