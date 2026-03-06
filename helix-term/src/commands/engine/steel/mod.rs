@@ -3670,9 +3670,7 @@ fn load_treesitter_api(engine: &mut Engine, generate_sources: bool) {
              -> Option<Result<TreeSitterMatch, SteelErr>> {
                 let (text, syn) = {
                     let Some(doc) = cx.editor.documents.get(&doc_id) else {
-                        return Some(
-                            steelerr!(Generic => "unable to find doc, id: {}", doc_id).into(),
-                        );
+                        return Some(steelerr!(Generic => "unable to find doc, id: {}", doc_id));
                     };
                     let text = doc.text().slice(..);
                     let Some(syn) = doc.syntax() else {
@@ -3705,9 +3703,7 @@ fn load_treesitter_api(engine: &mut Engine, generate_sources: bool) {
              -> Option<Result<TreeSitterMatch, SteelErr>> {
                 let (text, syn) = {
                     let Some(doc) = cx.editor.documents.get(&doc_id) else {
-                        return Some(
-                            steelerr!(Generic => "unable to find doc, id: {}", doc_id).into(),
-                        );
+                        return Some(steelerr!(Generic => "unable to find doc, id: {}", doc_id));
                     };
                     let text = doc.text().slice(..);
                     let Some(syn) = doc.syntax() else {
@@ -3751,10 +3747,10 @@ fn load_treesitter_api(engine: &mut Engine, generate_sources: bool) {
          -> Result<TreeSitterQuery, SteelErr> {
             let loader = config.language_configuration.load();
             let Some(lang) = loader.language_for_name(language.to_string()) else {
-                return steelerr!(Generic => "unable to find language: {}", language).into();
+                return steelerr!(Generic => "unable to find language: {}", language);
             };
             let Some(config) = loader.get_config(lang) else {
-                return steelerr!(Generic => "unable to find language: {}", language).into();
+                return steelerr!(Generic => "unable to find language: {}", language);
             };
             TreeSitterQuery::new(config.grammar, source.as_str())
         },
@@ -3812,7 +3808,7 @@ fn load_treesitter_api(engine: &mut Engine, generate_sources: bool) {
              -> Result<TreeSitterSyntax, SteelErr> {
                 let loader = config.language_configuration.load();
                 let Some(lang) = loader.language_for_name(language.as_str()) else {
-                    return steelerr!(Generic => "unable to find language: {}", language).into();
+                    return steelerr!(Generic => "unable to find language: {}", language);
                 };
                 TreeSitterSyntax::new(source, lang, loader.as_ref())
             },
