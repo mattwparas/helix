@@ -3815,7 +3815,7 @@ fn load_treesitter_api(engine: &mut Engine, generate_sources: bool) {
         );
 
     if generate_sources {
-        generate_module("treesitter.scm", &builtin_treesitter_module);
+        generate_module("treesitter.scm", builtin_treesitter_module);
         configure_lsp_builtins("treesitter", &module);
     }
     engine.register_steel_module(
@@ -3904,7 +3904,7 @@ pub fn generate_cog_file() {
 pub fn load_ext_api(engine: &mut Engine, generate_sources: bool) {
     let ext_api = include_str!("ext.scm");
     if generate_sources {
-        generate_module("ext.scm", &ext_api);
+        generate_module("ext.scm", ext_api);
     }
     engine.register_steel_module("helix/ext.scm".to_string(), ext_api.to_string());
 }

@@ -1141,7 +1141,7 @@ Returns a new rope value.
             .register_fn(
                 "tssyntax->layers-byte-range",
                 |syn: TreeSitterSyntax, lower: u32, upper: u32| -> Vec<TreeSitterTree> {
-                    TreeSitterSyntax::get_trees_byte_range(&syn.get_inner(), lower, upper)
+                    TreeSitterSyntax::get_trees_byte_range(syn.get_inner(), lower, upper)
                 },
             )
             .register_fn("tssyntax->tree", TreeSitterSyntax::get_tree);
