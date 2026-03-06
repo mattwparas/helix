@@ -3635,14 +3635,11 @@ fn load_treesitter_api(engine: &mut Engine, generate_sources: bool) {
              lower: u32,
              upper: u32|
              -> Option<Vec<TreeSitterTree>> {
-                let Some(syn) = cx
+                let syn = cx
                     .editor
                     .documents
                     .get(&doc_id)
-                    .and_then(|d| d.syntax.as_ref())
-                else {
-                    return None;
-                };
+                    .and_then(|d| d.syntax.as_ref())?;
 
                 Some(TreeSitterSyntax::get_trees_byte_range(syn, lower, upper))
             },

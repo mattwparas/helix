@@ -115,10 +115,7 @@ pub mod steel_implementations {
                 ));
             };
 
-            let val = match (func.function)(&vec![lang.clone()]) {
-                Ok(f) => f,
-                Err(e) => return Err(e),
-            };
+            let val = (func.function)(&vec![lang.clone()])?;
 
             let SteelVal::Custom(custom) = val else {
                 return Ok(None);
@@ -198,13 +195,10 @@ pub mod steel_implementations {
                 let val = SteelVal::StringV(SteelString::from(
                     loader.language(lang).config().language_id.clone(),
                 ));
-                let loaded = match query_loader.load(&val) {
-                    Ok(l) => l,
-                    Err(e) => return Err(e),
-                };
 
-                if loaded.is_some() {
-                    query_map.insert(lang, loaded.unwrap());
+                let loaded = query_loader.load(&val)?;
+                if let Some(loaded) = loaded {
+                    query_map.insert(lang, loaded);
                 }
             }
             let mut captures: BTreeMap<String, Vec<TreeSitterNode>> = BTreeMap::new();
