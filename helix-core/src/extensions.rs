@@ -115,7 +115,7 @@ pub mod steel_implementations {
                 ));
             };
 
-            let val = (func.function)(&vec![lang.clone()])?;
+            let val = (func.function)(&[lang.clone()])?;
 
             let SteelVal::Custom(custom) = val else {
                 return Ok(None);
@@ -123,7 +123,7 @@ pub mod steel_implementations {
 
             let tsquery =
                 steel::rvals::as_underlying_type::<TreeSitterQuery>(custom.write().as_ref())
-                    .map(|t| t.clone());
+                    .cloned();
 
             Ok(tsquery)
         }
@@ -266,7 +266,7 @@ pub mod steel_implementations {
         }
         pub fn get_root(&self) -> TreeSitterNode {
             let node = self.inner.root_node();
-            let extended = unsafe { std::mem::transmute::<_, Node<'static>>(node) };
+            let extended = unsafe { std::mem::transmute::<Node<'_>, Node<'static>>(node) };
             TreeSitterNode::new(extended, self)
         }
 
