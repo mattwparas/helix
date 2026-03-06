@@ -100,9 +100,9 @@ pub mod steel_implementations {
             };
             // arity *must* be one
             if func.get_arity().unwrap_or(1) == 1 {
-                return Ok(TreeSitterQueryLoader { fun });
+                Ok(TreeSitterQueryLoader { fun })
             } else {
-                return Err(format!("Bad Arity: {}", func.arity.unwrap()));
+                Err(format!("Bad Arity: {}", func.arity.unwrap()))
             }
         }
 
@@ -128,7 +128,7 @@ pub mod steel_implementations {
                 steel::rvals::as_underlying_type::<TreeSitterQuery>(custom.write().as_ref())
                     .map(|t| t.clone());
 
-            return Ok(tsquery);
+            Ok(tsquery)
         }
     }
 
@@ -209,9 +209,7 @@ pub mod steel_implementations {
             }
             let mut captures: BTreeMap<String, Vec<TreeSitterNode>> = BTreeMap::new();
             let mut layers: Vec<(Layer, TreeSitterTree)> = vec![];
-            let load = |lang| {
-                return query_map.get(&lang).map(|q| q.get_inner().as_ref());
-            };
+            let load = |lang| query_map.get(&lang).map(|q| q.get_inner().as_ref());
 
             for event in syn.query_iter::<_, (), _>(source, load, lower..upper) {
                 let QueryIterEvent::Match(m) = event else {
@@ -329,7 +327,7 @@ pub mod steel_implementations {
         pub fn print_tree(&self) -> String {
             let mut output = String::new();
             let _ = pretty_print_tree(&mut output, self.inner.clone());
-            return output;
+            output
         }
         pub fn new(node: Node<'_>, t: &TreeSitterTree) -> TreeSitterNode {
             // rely on the fact that when copying the treesitter tree, there is refcounting (we keep it alive :D): https://github.com/tree-sitter/tree-sitter/blob/630fa52717f2c575a53e21b1d324ade8e528b0bd/lib/src/tree.c#L24
@@ -348,11 +346,11 @@ pub mod steel_implementations {
                 r.tree = root.tree;
                 std::mem::transmute(r)
             };
-            return TreeSitterNode {
+            TreeSitterNode {
                 inner: extended,
                 _tree: Arc::clone(t.get_inner()),
                 _lang: t.get_language(),
-            };
+            }
         }
 
         fn new_internal(&self, node: Node<'static>) -> TreeSitterNode {
