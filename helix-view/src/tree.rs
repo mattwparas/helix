@@ -298,7 +298,26 @@ impl Tree {
     ///
     /// Panics if `index` is not in self.nodes, or if the node's content is not [Content::View]. This can be checked with [Self::contains].
     pub fn get(&self, index: ViewId) -> &View {
-        self.try_get(index).unwrap()
+        // Distinguish the two failure modes up front so crashes report
+        // which case they hit (stale id vs container node) instead of
+        // landing on a bare `unwrap() on a None value`.
+        match self.nodes.get(index) {
+            Some(Node {
+                content: Content::View(view),
+                ..
+            }) => view,
+            Some(Node {
+                content: Content::Container(_),
+                ..
+            }) => panic!(
+                "Tree::get called with ViewId={index:?} whose node is a Container, not a View. \
+                 Callers must check `try_get` or `contains` first."
+            ),
+            None => panic!(
+                "Tree::get called with ViewId={index:?} which no longer exists in the tree. \
+                 Likely a stale id held across a close/remove."
+            ),
+        }
     }
 
     /// Try to get reference to a [View] by index. Returns `None` if node content is not a [`Content::View`].

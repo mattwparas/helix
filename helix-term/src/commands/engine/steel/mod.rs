@@ -1951,23 +1951,21 @@ impl SteelScriptingEngine {
         cx: &mut Context,
         event: KeyEvent,
     ) -> Option<KeymapResult> {
-        let extension = {
-            let current_focus = cx.editor.tree.focus;
-            let view = cx.editor.tree.get(current_focus);
-            let doc = &view.doc;
-            let current_doc = cx.editor.documents.get(doc);
+        let current_focus = cx.editor.tree.focus;
+        let view = match cx.editor.tree.try_get(current_focus) {
+            Some(v) => v,
+            None => return None,
+        };
 
+        let extension = {
+            let current_doc = cx.editor.documents.get(&view.doc);
             current_doc
                 .and_then(|x| x.path())
                 .and_then(|x| x.extension())
                 .and_then(|x| x.to_str())
         };
 
-        let doc_id = {
-            let current_focus = cx.editor.tree.focus;
-            let view = cx.editor.tree.get(current_focus);
-            &view.doc
-        };
+        let doc_id = &view.doc;
 
         if let Some(extension) = extension {
             let map = get_extension_keymap();
@@ -4700,38 +4698,39 @@ fn get_init_scm_path() -> String {
 // TODO:
 fn current_path(cx: &mut Context) -> Option<String> {
     let current_focus = cx.editor.tree.focus;
-    let view = cx.editor.tree.get(current_focus);
-    let doc = &view.doc;
-    // Lifetime of this needs to be tied to the existing document
-    let current_doc = cx.editor.documents.get(doc);
-    current_doc.and_then(|x| x.path().and_then(|x| x.to_str().map(|x| x.to_string())))
+    let view = cx.editor.tree.try_get(current_focus)?;
+    let current_doc = cx.editor.documents.get(&view.doc)?;
+    current_doc
+        .path()
+        .and_then(|x| x.to_str().map(|x| x.to_string()))
 }
 
 fn set_scratch_buffer_name(cx: &mut Context, name: String) {
     let current_focus = cx.editor.tree.focus;
-    let view = cx.editor.tree.get(current_focus);
-    let doc = &view.doc;
-    // Lifetime of this needs to be tied to the existing document
-    let current_doc = cx.editor.documents.get_mut(doc);
-
-    if let Some(current_doc) = current_doc {
-        current_doc.name = Some(name);
+    if let Some(view) = cx.editor.tree.try_get(current_focus) {
+        if let Some(current_doc) = cx.editor.documents.get_mut(&view.doc) {
+            current_doc.name = Some(name);
+        }
     }
 }
 
 fn set_buffer_uri(cx: &mut Context, uri: SteelString) -> anyhow::Result<()> {
     let current_focus = cx.editor.tree.focus;
-    let view = cx.editor.tree.get(current_focus);
-    let doc = &view.doc;
-    // Lifetime of this needs to be tied to the existing document
-    let current_doc = cx.editor.documents.get_mut(doc);
+    let view = cx
+        .editor
+        .tree
+        .try_get(current_focus)
+        .ok_or_else(|| anyhow::anyhow!("No active view"))?;
+    let current_doc = cx
+        .editor
+        .documents
+        .get_mut(&view.doc)
+        .ok_or_else(|| anyhow::anyhow!("No active document"))?;
 
-    if let Some(current_doc) = current_doc {
-        if let Ok(url) = url::Url::from_str(uri.as_str()) {
-            current_doc.uri = Some(Box::new(url));
-        } else {
-            anyhow::bail!("Unable to parse uri: {:?}", uri);
-        }
+    if let Ok(url) = url::Url::from_str(uri.as_str()) {
+        current_doc.uri = Some(Box::new(url));
+    } else {
+        anyhow::bail!("Unable to parse uri: {:?}", uri);
     }
 
     Ok(())
@@ -4741,8 +4740,8 @@ fn cx_current_focus(cx: &mut Context) -> helix_view::ViewId {
     cx.editor.tree.focus
 }
 
-fn cx_get_document_id(cx: &mut Context, view_id: helix_view::ViewId) -> DocumentId {
-    cx.editor.tree.get(view_id).doc
+fn cx_get_document_id(cx: &mut Context, view_id: helix_view::ViewId) -> Option<DocumentId> {
+    cx.editor.tree.try_get(view_id).map(|v| v.doc)
 }
 
 fn document_id_to_text(cx: &mut Context, doc_id: DocumentId) -> Option<SteelRopeSlice> {
@@ -5410,11 +5409,8 @@ pub fn add_inlay_hint(
     completion: SteelString,
 ) -> Option<(usize, usize)> {
     let view_id = cx.editor.tree.focus;
-    if !cx.editor.tree.contains(view_id) {
-        return None;
-    }
-    let view = cx.editor.tree.get(view_id);
-    let doc_id = cx.editor.tree.get(view_id).doc;
+    let view = cx.editor.tree.try_get(view_id)?;
+    let doc_id = view.doc;
     let doc = cx.editor.documents.get_mut(&doc_id)?;
     let mut new_inlay_hints = doc.inlay_hints(view_id).cloned().unwrap_or_else(|| {
         let doc_text = doc.text();
@@ -5455,11 +5451,8 @@ pub fn remove_inlay_hint_by_id(
 ) -> Option<()> {
     // let text = completion.to_string();
     let view_id = cx.editor.tree.focus;
-    if !cx.editor.tree.contains(view_id) {
-        return None;
-    }
-    let view = cx.editor.tree.get(view_id);
-    let doc_id = cx.editor.tree.get(view_id).doc;
+    let view = cx.editor.tree.try_get(view_id)?;
+    let doc_id = view.doc;
     let doc = cx.editor.documents.get_mut(&doc_id)?;
 
     let inlay_hints = doc.inlay_hints(view_id)?;
@@ -5500,10 +5493,10 @@ pub fn remove_inlay_hint_by_id(
 pub fn remove_inlay_hint(cx: &mut Context, char_index: usize, _completion: SteelString) -> bool {
     // let text = completion.to_string();
     let view_id = cx.editor.tree.focus;
-    if !cx.editor.tree.contains(view_id) {
-        return false;
-    }
-    let doc_id = cx.editor.tree.get_mut(view_id).doc;
+    let doc_id = match cx.editor.tree.try_get(view_id) {
+        Some(view) => view.doc,
+        None => return false,
+    };
     let doc = match cx.editor.documents.get_mut(&doc_id) {
         Some(x) => x,
         None => return false,
