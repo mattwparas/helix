@@ -32,8 +32,8 @@ use helix_view::{
         WhitespaceRender, WhitespaceRenderValue,
     },
     events::{
-        DocumentDidChange, DocumentDidClose, DocumentDidOpen, DocumentFocusLost, DocumentSaved,
-        SelectionDidChange,
+        DocumentDidChange, DocumentDidClose, DocumentDidOpen, DocumentFocusGained,
+        DocumentFocusLost, DocumentSaved, SelectionDidChange,
     },
     extension::document_id_to_usize,
     graphics::CursorKind,
@@ -3322,6 +3322,7 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
         "terminal-focus-gained" => register_terminal_focus_gained(generation, rooted),
         "terminal-focus-lost" => register_terminal_focus_lost(generation, rooted),
         "document-focus-lost" => register_document_focus_lost(generation, rooted),
+        "document-focus-gained" => register_document_focus_gained(generation, rooted),
         "selection-did-change" => register_selection_did_change(generation, rooted),
         "document-opened" => register_document_opened(generation, rooted),
         "document-saved" => register_document_saved(generation, rooted),
@@ -3486,6 +3487,22 @@ fn register_document_focus_lost(
     // is probably the most helpful so that way we can look the document up
     // and act accordingly?
     register_hook!(move |event: &mut DocumentFocusLost<'_>| {
+        let cloned_func = rooted.value().clone();
+        let doc_id = event.doc;
+        let callback =
+            construct_callback(generation, cloned_func, [doc_id.into_steelval().unwrap()]);
+        job::dispatch_blocking_jobs(callback);
+
+        Ok(())
+    });
+    Ok(SteelVal::Void).into()
+}
+
+fn register_document_focus_gained(
+    generation: usize,
+    rooted: RootedSteelVal,
+) -> steel::UnRecoverableResult {
+    register_hook!(move |event: &mut DocumentFocusGained<'_>| {
         let cloned_func = rooted.value().clone();
         let doc_id = event.doc;
         let callback =

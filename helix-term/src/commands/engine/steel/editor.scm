@@ -21,6 +21,7 @@
 ;; * 'terminal-focus-gained
 ;; * 'terminal-focus-lost
 ;; * 'document-focus-lost
+;; * 'document-focus-gained
 ;; * 'selection-did-change
 ;; * 'document-opened
 ;; * 'document-saved
@@ -79,6 +80,10 @@
 ;; ## document-focus-lost
 ;;
 ;; Expects a function with one argument to accept the doc id of the document that has lost focus.
+;;
+;; ## document-focus-gained
+;;
+;; Expects a function with one argument to accept the doc id of the document that has gained focus.
 ;;
 ;; ## selection-did-change
 ;;

@@ -4,7 +4,9 @@ use crate::{
     document::{
         DocumentOpenError, DocumentSavedEventFuture, DocumentSavedEventResult, Mode, SavePoint,
     },
-    events::{DocumentDidClose, DocumentDidOpen, DocumentFocusLost, DocumentSaved},
+    events::{
+        DocumentDidClose, DocumentDidOpen, DocumentFocusGained, DocumentFocusLost, DocumentSaved,
+    },
     graphics::{CursorKind, Rect},
     handlers::Handlers,
     info::Info,
@@ -1854,6 +1856,10 @@ impl Editor {
                     editor: self,
                     doc: id,
                 });
+                dispatch(DocumentFocusGained {
+                    editor: self,
+                    doc: id,
+                });
                 return;
             }
             Action::Load => {
@@ -1893,6 +1899,10 @@ impl Editor {
             dispatch(DocumentFocusLost {
                 editor: self,
                 doc: focus_lost,
+            });
+            dispatch(DocumentFocusGained {
+                editor: self,
+                doc: id,
             });
         }
     }
@@ -2149,9 +2159,14 @@ impl Editor {
         doc_mut!(self).mark_as_focused();
 
         let focus_lost = self.tree.get(prev_id).doc;
+        let focus_gained = self.tree.get(view_id).doc;
         dispatch(DocumentFocusLost {
             editor: self,
             doc: focus_lost,
+        });
+        dispatch(DocumentFocusGained {
+            editor: self,
+            doc: focus_gained,
         });
     }
 
@@ -2475,6 +2490,10 @@ impl Editor {
             dispatch(DocumentFocusLost {
                 editor: self,
                 doc: old_doc_id,
+            });
+            dispatch(DocumentFocusGained {
+                editor: self,
+                doc: dest_doc_id,
             });
         }
         let (view, doc) = current!(self);
