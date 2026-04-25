@@ -309,6 +309,46 @@ impl Application {
 
         // TODO: need to recalculate view tree if necessary
 
+        // Detect viewport changes and dispatch ViewportChanged at most once
+        // per view per frame.  We use a two-pass collect to satisfy the
+        // borrow checker (can't hold &mut View and &Document at the same time
+        // through the tree iterator).  Running this after autoresize() ensures
+        // the snapshot reflects post-resize geometry, so height changes are not
+        // lagged by one frame.
+        {
+            use helix_view::events::ViewportChanged;
+            // Pass 1: collect what each view currently looks like.
+            let mut snapshot: Vec<(helix_view::ViewId, helix_view::DocumentId, usize, u16)> =
+                Vec::new();
+            for (view, _) in cx.editor.tree.views() {
+                let doc_id = view.doc;
+                if let Some(doc) = cx.editor.documents.get(&doc_id) {
+                    let anchor = doc.view_offset(view.id).anchor;
+                    let height = view.inner_area(doc).height;
+                    snapshot.push((view.id, doc_id, anchor, height));
+                }
+            }
+            // Pass 2: compare against last-seen values; dispatch if changed.
+            let mut to_dispatch: Vec<(helix_view::ViewId, helix_view::DocumentId, usize, u16)> =
+                Vec::new();
+            for &(view_id, doc_id, anchor, height) in &snapshot {
+                let view = cx.editor.tree.get_mut(view_id);
+                if anchor != view.last_viewport_anchor || height != view.last_viewport_height {
+                    view.last_viewport_anchor = anchor;
+                    view.last_viewport_height = height;
+                    to_dispatch.push((view_id, doc_id, anchor, height));
+                }
+            }
+            for (view_id, doc_id, anchor_char_idx, height) in to_dispatch {
+                helix_event::dispatch(ViewportChanged {
+                    view_id,
+                    doc_id,
+                    anchor_char_idx,
+                    height,
+                });
+            }
+        }
+
         let surface = self.terminal.current_buffer_mut();
 
         self.compositor.render(area, surface, &mut cx);

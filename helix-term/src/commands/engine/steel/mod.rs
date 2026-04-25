@@ -33,7 +33,7 @@ use helix_view::{
     },
     events::{
         DocumentDidChange, DocumentDidClose, DocumentDidOpen, DocumentFocusGained,
-        DocumentFocusLost, DocumentSaved, SelectionDidChange,
+        DocumentFocusLost, DocumentSaved, SelectionDidChange, ViewportChanged,
     },
     extension::document_id_to_usize,
     graphics::CursorKind,
@@ -3323,6 +3323,7 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
         "terminal-focus-lost" => register_terminal_focus_lost(generation, rooted),
         "document-focus-lost" => register_document_focus_lost(generation, rooted),
         "document-focus-gained" => register_document_focus_gained(generation, rooted),
+        "viewport-changed" => register_viewport_changed(generation, rooted),
         "selection-did-change" => register_selection_did_change(generation, rooted),
         "document-opened" => register_document_opened(generation, rooted),
         "document-saved" => register_document_saved(generation, rooted),
@@ -3507,6 +3508,33 @@ fn register_document_focus_gained(
         let doc_id = event.doc;
         let callback =
             construct_callback(generation, cloned_func, [doc_id.into_steelval().unwrap()]);
+        job::dispatch_blocking_jobs(callback);
+
+        Ok(())
+    });
+    Ok(SteelVal::Void).into()
+}
+
+fn register_viewport_changed(
+    generation: usize,
+    rooted: RootedSteelVal,
+) -> steel::UnRecoverableResult {
+    register_hook!(move |event: &mut ViewportChanged| {
+        let cloned_func = rooted.value().clone();
+        let view_id = event.view_id;
+        let doc_id = event.doc_id;
+        let anchor = event.anchor_char_idx;
+        let height = event.height;
+        let callback = construct_callback(
+            generation,
+            cloned_func,
+            [
+                view_id.into_steelval().unwrap(),
+                doc_id.into_steelval().unwrap(),
+                (anchor as i64).into_steelval().unwrap(),
+                (height as i64).into_steelval().unwrap(),
+            ],
+        );
         job::dispatch_blocking_jobs(callback);
 
         Ok(())

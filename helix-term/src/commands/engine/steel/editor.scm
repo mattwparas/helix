@@ -22,6 +22,7 @@
 ;; * 'terminal-focus-lost
 ;; * 'document-focus-lost
 ;; * 'document-focus-gained
+;; * 'viewport-changed
 ;; * 'selection-did-change
 ;; * 'document-opened
 ;; * 'document-saved
@@ -84,6 +85,19 @@
 ;; ## document-focus-gained
 ;;
 ;; Expects a function with one argument to accept the doc id of the document that has gained focus.
+;;
+;; ## viewport-changed
+;;
+;; Expects a function with four arguments: the view id, the doc id, the anchor
+;; (char index of the first visible character) and the viewport height in rows.
+;; Fired at most once per view per frame, whenever the viewport anchor or
+;; height changes - e.g. on scroll or resize.
+;;
+;; ```scheme
+;; (register-hook 'viewport-changed
+;;                (lambda (view-id doc-id anchor height)
+;;                  (log::info! (to-string view-id doc-id anchor height))))
+;; ```
 ;;
 ;; ## selection-did-change
 ;;

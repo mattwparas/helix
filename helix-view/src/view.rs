@@ -157,6 +157,10 @@ pub struct View {
     // left to future work. For now we treat all views as focused and give them
     // each their own handler.
     pub diagnostics_handler: DiagnosticsHandler,
+    /// Last known anchor char-index, used to detect anchor changes at drain time.
+    pub last_viewport_anchor: usize,
+    /// Last known inner height, used to detect height changes at drain time.
+    pub last_viewport_height: u16,
 }
 
 impl fmt::Debug for View {
@@ -182,6 +186,8 @@ impl View {
             gutters,
             doc_revisions: HashMap::new(),
             diagnostics_handler: DiagnosticsHandler::new(),
+            last_viewport_anchor: 0,
+            last_viewport_height: 0,
         }
     }
 

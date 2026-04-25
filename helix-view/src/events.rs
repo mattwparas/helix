@@ -27,6 +27,13 @@ events! {
     // called **after** a document gains focus (but not when it is first opened)
     DocumentFocusGained<'a> { editor: &'a mut Editor, doc: DocumentId }
     DocumentSaved<'a> { editor: &'a mut Editor, doc: DocumentId }
+    // fired at most once per view per frame when the viewport anchor or height changes
+    ViewportChanged {
+        view_id: ViewId,
+        doc_id: DocumentId,
+        anchor_char_idx: usize,
+        height: u16
+    }
 
     LanguageServerInitialized<'a> {
         editor: &'a mut Editor,
