@@ -60,17 +60,17 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     error::Error,
+    fs,
     io::Write,
     num::{NonZeroU8, NonZeroUsize},
     ops::{Deref, DerefMut},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Mutex, MutexGuard, RwLock, RwLockReadGuard, Weak,
+        Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, Weak,
     },
     time::{Duration, SystemTime},
 };
-use std::{str::FromStr as _, sync::Arc};
 
 use steel::{rvals::Custom, steel_vm::builtin::BuiltInModule};
 
@@ -3975,12 +3975,18 @@ pub fn alternative_runtime_search_path() -> Option<PathBuf> {
 
 pub fn generate_cog_file() {
     if let Some(path) = alternative_runtime_search_path() {
-        std::fs::write(
-            path.join("cog.scm"),
-            r#"(define package-name 'helix)
-            (define version "0.1.0")"#,
-        )
-        .unwrap();
+        let cog_scm_path = path.join("cog.scm");
+        if fs::exists(cog_scm_path) {
+            log::info!("using pre-existing cog.scm file");
+        } else {
+            if let Err(e) = fs::write(
+                cog_scm_path,
+                r#"(define package-name 'helix)
+                (define version "0.1.0")"#,
+            ) {
+                log::warn!("error writing cog.scm file: {}", e);
+            }
+        }
     }
 }
 
