@@ -1,0 +1,12 @@
+[submodule "plugins/helix-file-watcher"]
+	path = plugins/helix-file-watcher
+	url = https://github.com/mattwparas/helix-file-watcher.git
+[submodule "plugins/smooth-scroll.hx"]
+	path = plugins/smooth-scroll.hx
+	url = https://github.com/thomasschafer/smooth-scroll.hx.git
+[submodule "plugins/wakatime.hx"]
+	path = plugins/wakatime.hx
+	url = https://github.com/Xerxes-2/wakatime.hx.git
+[submodule "plugins/fake-warp.hx"]
+	path = plugins/fake-warp.hx
+	url = https://github.com/Xerxes-2/fake-warp.hx.git
