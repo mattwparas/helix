@@ -3954,6 +3954,8 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "add-inlay-hint", add_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint", remove_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint-by-id", remove_inlay_hint_by_id)
+        .register_fn_with_ctx(CTX, "set-overlays!", set_plugin_overlays)
+        .register_fn_with_ctx(CTX, "clear-overlays!", clear_plugin_overlays)
         .register_fn("fuzzy-match", fuzzy_match);
 
     if generate_sources {
@@ -5519,6 +5521,55 @@ pub fn remove_inlay_hint(cx: &mut Context, char_index: usize, _completion: Steel
         .retain(|x| x.char_idx != char_index);
     doc.set_inlay_hints(view_id, new_inlay_hints);
     true
+}
+
+// "set-overlays!",
+fn set_plugin_overlays(cx: &mut Context, overlays: SteelVal) -> anyhow::Result<()> {
+    use helix_core::text_annotations::Overlay;
+    use helix_core::unicode::segmentation::UnicodeSegmentation;
+
+    let SteelVal::ListV(pairs) = overlays else {
+        anyhow::bail!("set-overlays! expects a list of (char-index . replacement) pairs");
+    };
+
+    let mut parsed = Vec::with_capacity(pairs.len());
+
+    for pair in pairs.iter() {
+        let SteelVal::Pair(pair) = pair else {
+            anyhow::bail!("set-overlays! expects (char-index . replacement) pairs, found: {pair}");
+        };
+
+        let SteelVal::IntV(char_idx) = pair.car() else {
+            anyhow::bail!("set-overlays!: char-index must be an integer");
+        };
+
+        let Ok(char_idx) = usize::try_from(char_idx) else {
+            anyhow::bail!("set-overlays!: char-index must be non-negative, found: {char_idx}");
+        };
+
+        let SteelVal::StringV(replacement) = pair.cdr() else {
+            anyhow::bail!("set-overlays!: replacement must be a string");
+        };
+
+        if replacement.graphemes(true).count() > 1 {
+            anyhow::bail!(
+                "set-overlays!: replacement must be a single grapheme or the empty string, found: {replacement}"
+            );
+        }
+
+        parsed.push(Overlay::new(char_idx, replacement.as_str()));
+    }
+
+    let (view, doc) = current!(cx.editor);
+    doc.set_plugin_overlays(view.id, parsed);
+
+    Ok(())
+}
+
+// "clear-overlays!",
+fn clear_plugin_overlays(cx: &mut Context) {
+    let (view, doc) = current!(cx.editor);
+    doc.clear_plugin_overlays(view.id);
 }
 
 pub fn insert_string(cx: &mut Context, string: SteelString) {

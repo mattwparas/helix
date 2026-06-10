@@ -320,6 +320,44 @@
 ;;
 (define remove-inlay-hint-by-id helix.remove-inlay-hint-by-id)
 
+(provide set-overlays!)
+;;@doc
+;;Set the conceal overlays for the current view, replacing any previously
+;;set overlays. Each overlay replaces the displayed grapheme at a character
+;;index with a replacement string, without modifying the underlying text.
+;;An empty replacement hides the grapheme entirely.
+;;
+;;```scheme
+;;(set-overlays! overlays)
+;;```
+;;
+;;overlays : (listof (pair? int? string?))
+;;
+;;Each replacement must be a single grapheme or the empty string. Overlays
+;;anchored past the end of the document are ignored. They are styled with
+;;the `ui.virtual.conceal` theme key.
+;;
+;;When the document is edited, overlay positions follow the changes and
+;;overlays whose grapheme is deleted are removed, but an edit that rewrites
+;;the concealed grapheme in place leaves the overlay on the new text.
+;;Refresh overlays on document change to stay in sync, e.g. to conceal
+;;`\alpha` as α:
+;;
+;;```scheme
+;;(set-overlays! (list (cons idx "α")            ; replace the backslash
+;;                     (cons (+ idx 1) "")       ; hide "alpha"
+;;                     (cons (+ idx 2) "")
+;;                     (cons (+ idx 3) "")
+;;                     (cons (+ idx 4) "")
+;;                     (cons (+ idx 5) "")))
+;;```
+(define set-overlays! helix.set-overlays!)
+
+(provide clear-overlays!)
+;;@doc
+;;Clear all conceal overlays for the current view.
+(define clear-overlays! helix.clear-overlays!)
+
 (provide fuzzy-match)
 ;;@doc
 ;; Convenience function to easily fuzzy match
