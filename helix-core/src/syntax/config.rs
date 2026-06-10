@@ -126,6 +126,10 @@ impl GlobSet {
     pub fn is_match<P: AsRef<std::path::Path>>(&self, path: P) -> bool {
         self.inner.is_match(path)
     }
+
+    pub fn from_inner(inner: globset::GlobSet, patterns: Vec<String>) -> Self {
+        Self { inner, patterns }
+    }
 }
 
 impl Serialize for GlobSet {
