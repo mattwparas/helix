@@ -447,6 +447,13 @@ impl View {
     ) -> TextAnnotations<'a> {
         let mut text_annotations = TextAnnotations::default();
 
+        // Plugin conceal overlays are added before jump labels so that jump
+        // labels win when both target the same grapheme.
+        if let Some(overlays) = doc.plugin_overlays(self.id) {
+            let style = theme.and_then(|t| t.find_highlight("ui.virtual.conceal"));
+            text_annotations.add_overlay(overlays, style);
+        }
+
         if let Some(labels) = doc.jump_labels.get(&self.id) {
             let style = theme.and_then(|t| t.find_highlight("ui.virtual.jump-label"));
             text_annotations.add_overlay(labels, style);

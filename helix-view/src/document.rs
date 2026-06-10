@@ -151,6 +151,14 @@ pub struct Document {
     pub(crate) inlay_hints: HashMap<ViewId, DocumentInlayHints>,
     /// Jump label overlays for each view.
     pub(crate) jump_labels: HashMap<ViewId, Vec<Overlay>>,
+    /// Plugin-managed conceal overlays for each view, replacing single
+    /// graphemes on screen without modifying the underlying text.
+    ///
+    /// Unlike `jump_labels`, which are transient, these persist until
+    /// explicitly cleared. Positions are mapped through document changes;
+    /// overlays whose grapheme is deleted are removed (see
+    /// [`Self::set_plugin_overlays`] for the exact contract).
+    plugin_overlays: HashMap<ViewId, Vec<Overlay>>,
     /// LSP document highlights for each view, stored as char ranges.
     pub(crate) document_highlights: HashMap<ViewId, DocumentHighlights>,
     /// Set to `true` when the document is updated, reset to `false` on the next inlay hints
@@ -761,6 +769,7 @@ impl Document {
             name: None,
             readonly: false,
             jump_labels: HashMap::new(),
+            plugin_overlays: HashMap::new(),
             document_highlights: HashMap::new(),
             color_swatches: None,
             document_links: Vec::new(),
@@ -1437,6 +1446,7 @@ impl Document {
         self.selections.remove(&view_id);
         self.inlay_hints.remove(&view_id);
         self.jump_labels.remove(&view_id);
+        self.plugin_overlays.remove(&view_id);
         self.document_highlights.remove(&view_id);
         self.document_highlight_controllers.remove(&view_id);
     }
@@ -1589,6 +1599,29 @@ impl Document {
             apply_inlay_hint_changes(other_inlay_hints);
             apply_inlay_hint_changes(padding_after_inlay_hints);
         }
+
+        // Map plugin overlay positions through the changes so each overlay
+        // stays anchored to the grapheme it conceals. Overlays whose grapheme
+        // is deleted collapse to an empty range and are removed: a conceal
+        // that drifted onto unrelated text would be worse than briefly
+        // revealing the source text.
+        for overlays in self.plugin_overlays.values_mut() {
+            let mut ends: Vec<_> = overlays
+                .iter()
+                .map(|overlay| overlay.char_idx + 1)
+                .collect();
+            changes.update_positions(
+                overlays
+                    .iter_mut()
+                    .map(|overlay| (&mut overlay.char_idx, Assoc::After)),
+            );
+            changes.update_positions(ends.iter_mut().map(|end| (end, Assoc::After)));
+            let mut ends = ends.into_iter();
+            overlays.retain(|overlay| overlay.char_idx < ends.next().unwrap());
+        }
+        // Mirror set_plugin_overlays: an emptied layer drops its map entry
+        // rather than lingering as an empty Vec.
+        self.plugin_overlays.retain(|_, overlays| !overlays.is_empty());
 
         for highlights in self.document_highlights.values_mut() {
             let text_len = self.text.len_chars();
@@ -2397,6 +2430,35 @@ impl Document {
         self.jump_labels.remove(&view_id);
     }
 
+    /// Set the plugin-managed conceal overlays for `view_id`, replacing any
+    /// previously set overlays.
+    ///
+    /// Overlays are sorted by position; overlays anchored past the end of the
+    /// document are discarded. When the document is edited, the positions of
+    /// the remaining overlays are mapped through the changes so they stay
+    /// anchored to the grapheme they conceal, and overlays whose grapheme is
+    /// deleted are removed. The mapping is purely positional: an edit that
+    /// rewrites the concealed grapheme in place leaves the overlay on the new
+    /// text, so plugins should refresh their overlays on document change.
+    pub fn set_plugin_overlays(&mut self, view_id: ViewId, mut overlays: Vec<Overlay>) {
+        let text_len = self.text.len_chars();
+        overlays.retain(|overlay| overlay.char_idx < text_len);
+        overlays.sort_by_key(|overlay| overlay.char_idx);
+        if overlays.is_empty() {
+            self.plugin_overlays.remove(&view_id);
+        } else {
+            self.plugin_overlays.insert(view_id, overlays);
+        }
+    }
+
+    pub fn clear_plugin_overlays(&mut self, view_id: ViewId) {
+        self.plugin_overlays.remove(&view_id);
+    }
+
+    pub fn plugin_overlays(&self, view_id: ViewId) -> Option<&[Overlay]> {
+        self.plugin_overlays.get(&view_id).map(Vec::as_slice)
+    }
+
     pub fn set_document_highlights(
         &mut self,
         view_id: ViewId,
@@ -2526,6 +2588,57 @@ mod test {
                 range_length: None,
             }]
         );
+    }
+
+    #[test]
+    fn plugin_overlays_remap_through_edits() {
+        let text = Rope::from("hello \\alpha world");
+        let mut doc = Document::from(
+            text,
+            None,
+            Arc::new(ArcSwap::new(Arc::new(Config::default()))),
+            Arc::new(ArcSwap::from_pointee(syntax::Loader::default())),
+        );
+        let view = ViewId::default();
+        doc.set_selection(view, Selection::single(0, 0));
+
+        // Conceal "\alpha" (chars 6..=11): replace the backslash with α and
+        // hide the rest. Passed unsorted and with an out-of-bounds entry to
+        // exercise the invariants enforced on set.
+        doc.set_plugin_overlays(
+            view,
+            vec![
+                Overlay::new(7, ""),
+                Overlay::new(6, "α"),
+                Overlay::new(8, ""),
+                Overlay::new(9, ""),
+                Overlay::new(10, ""),
+                Overlay::new(11, ""),
+                Overlay::new(999, "x"),
+            ],
+        );
+
+        let positions = |doc: &Document| -> Vec<usize> {
+            doc.plugin_overlays(view)
+                .unwrap()
+                .iter()
+                .map(|overlay| overlay.char_idx)
+                .collect()
+        };
+        assert_eq!(positions(&doc), [6, 7, 8, 9, 10, 11]);
+
+        // Inserting before the concealed range shifts the overlays right.
+        let transaction = Transaction::change(doc.text(), [(0, 0, Some(">> ".into()))].into_iter());
+        doc.apply(&transaction, view);
+        assert_eq!(doc.text(), ">> hello \\alpha world");
+        assert_eq!(positions(&doc), [9, 10, 11, 12, 13, 14]);
+
+        // Deleting concealed graphemes ("ph") drops their overlays and
+        // shifts the rest, instead of letting them drift onto other text.
+        let transaction = Transaction::change(doc.text(), [(12, 14, None)].into_iter());
+        doc.apply(&transaction, view);
+        assert_eq!(doc.text(), ">> hello \\ala world");
+        assert_eq!(positions(&doc), [9, 10, 11, 12]);
     }
 
     #[test]

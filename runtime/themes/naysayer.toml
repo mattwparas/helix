@@ -13,6 +13,7 @@
 "ui.statusline.inactive" = { fg = "text", bg = "bg" }
 "ui.virtual" = "indent"
 "ui.virtual.ruler" = { bg = "line-fg" }
+"ui.virtual.conceal" = { fg = "white", modifiers = ["bold"] }
 "ui.cursor.match" = { bg = "cyan" }
 "ui.cursor" = { bg = "#777777" }
 "ui.cursor.primary" = { bg = "white" }

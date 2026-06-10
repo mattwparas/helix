@@ -60,6 +60,7 @@ tabstop = { modifiers = ["italic"], bg = "bossanova" }
 "ui.virtual" = { fg = "comet" }
 "ui.virtual.ruler" = { bg = "bossanova" }
 "ui.virtual.jump-label" = { fg = "apricot", modifiers = ["bold"] }
+"ui.virtual.conceal" = { fg = "white", modifiers = ["bold"] }
 
 "ui.virtual.indent-guide" = { fg = "comet" }
 
