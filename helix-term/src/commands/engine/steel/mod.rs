@@ -638,6 +638,7 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
     module
         .register_fn_with_ctx(CTX, "insert_char", insert_char)
         .register_fn_with_ctx(CTX, "insert_string", insert_string)
+        .register_fn_with_ctx(CTX, "commit-changes-to-history", commit_changes_to_history)
         .register_fn_with_ctx(CTX, "set-current-selection-object!", set_selection)
         .register_fn_with_ctx(CTX, "push-range-to-selection!", push_range_to_selection)
         .register_fn_with_ctx(
@@ -5524,4 +5525,13 @@ pub fn insert_string(cx: &mut Context, string: SteelString) {
         indent,
     );
     doc.apply(&transaction, view.id);
+}
+
+/// Commit any pending document changes to the undo history.
+/// This must be called after document modifications in async callbacks
+/// to prevent selection tracking crashes when EditorView::handle_event
+/// tries to commit stale changes.
+pub fn commit_changes_to_history(cx: &mut Context) {
+    let (view, doc) = current!(cx.editor);
+    doc.append_changes_to_history(view);
 }

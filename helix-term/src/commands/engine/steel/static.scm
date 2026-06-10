@@ -13,6 +13,13 @@
 ;;Insert a given string at the current cursor position
 (define insert_string helix.static.insert_string)
 
+(provide commit-changes-to-history)
+;;@doc
+;;Commit any pending document changes to the undo history. Call this after
+;;modifying the document from an async callback to keep selection tracking
+;;consistent with the undo history.
+(define commit-changes-to-history helix.static.commit-changes-to-history)
+
 (provide set-current-selection-object!)
 ;;@doc
 ;;Update the selection object to the current selection within the editor
