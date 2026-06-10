@@ -54,13 +54,38 @@ mod steel_implementations {
         fn fmt(&self) -> Option<std::result::Result<String, std::fmt::Error>> {
             Some(Ok(format!("{:?}", self)))
         }
+        fn equality_hint(&self, other: &dyn steel::rvals::CustomType) -> bool {
+            if let Some(other) = as_underlying_type::<Self>(other) {
+                self == other
+            } else {
+                false
+            }
+        }
     }
     impl Custom for Color {
         fn fmt(&self) -> Option<std::result::Result<String, std::fmt::Error>> {
             Some(Ok(format!("{:?}", self)))
         }
+        fn equality_hint(&self, other: &dyn steel::rvals::CustomType) -> bool {
+            if let Some(other) = as_underlying_type::<Self>(other) {
+                self == other
+            } else {
+                false
+            }
+        }
     }
-    impl Custom for UnderlineStyle {}
+    impl Custom for UnderlineStyle {
+        fn fmt(&self) -> Option<std::result::Result<String, std::fmt::Error>> {
+            Some(Ok(format!("{:?}", self)))
+        }
+        fn equality_hint(&self, other: &dyn steel::rvals::CustomType) -> bool {
+            if let Some(other) = as_underlying_type::<Self>(other) {
+                self == other
+            } else {
+                false
+            }
+        }
+    }
 
     impl CustomReference for Event {}
     impl Custom for Rect {
