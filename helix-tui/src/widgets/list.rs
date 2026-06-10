@@ -60,7 +60,7 @@ impl<'a> ListItem<'a> {
 ///
 /// ```
 /// # use helix_tui::widgets::{Block, Borders, List, ListItem};
-/// # use helix_tui::style::{Style, Color, Modifier};
+/// # use helix_view::graphics::{Style, Color, Modifier};
 /// let items = [ListItem::new("Item 1"), ListItem::new("Item 2"), ListItem::new("Item 3")];
 /// List::new(items)
 ///     .block(Block::bordered().title("List"))
