@@ -4155,7 +4155,7 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
         SteelVal::IntV(engine.engine_id().as_usize() as _),
     );
 
-    configure_builtin_sources(&mut engine, true);
+    configure_builtin_sources(&mut engine, false);
 
     // Hooks
     engine.register_fn("register-hook!", register_hook);
