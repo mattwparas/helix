@@ -332,3 +332,21 @@
 ;; pattern : string?
 ;; input-list : (list? string?)
 (define fuzzy-match helix.fuzzy-match)
+
+;;@doc
+;; Register a hook that fires on every LSP WorkDoneProgress begin/report/end notification.
+;; The callback receives six arguments:
+;;   server-id  : integer — the language server ID
+;;   token      : string  — the progress token (number or string from the server)
+;;   kind       : string  — "begin" | "report" | "end"
+;;   title      : string? — task title (only present on "begin")
+;;   message    : string? — optional human-readable message
+;;   percentage : integer? — optional 0-100 completion percentage
+;;
+;; Example:
+;; ```scheme
+;; (register-hook! 'lsp-progress
+;;   (lambda (server-id token kind title message percentage)
+;;     (when (equal? kind "begin")
+;;       (display (string-append "LSP: " (or title token) "\n")))))
+;; ```

@@ -35,6 +35,18 @@ events! {
         server_id: LanguageServerId
     }
 
+    /// Fired for every WorkDoneProgress begin/report/end notification.
+    /// Uses owned data so it can be dispatched without holding an Editor borrow.
+    LspProgressUpdate {
+        server_id: LanguageServerId,
+        token: String,
+        /// "begin" | "report" | "end"
+        kind: String,
+        title: Option<String>,
+        message: Option<String>,
+        percentage: Option<u32>,
+    }
+
     // NOTE: this event is simple for now and is expected to change as the config system evolves.
     // Ideally it would say what changed.
     ConfigDidChange<'a> {
