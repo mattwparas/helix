@@ -153,6 +153,7 @@ impl EditorView {
             }
 
             Self::doc_diagnostics_highlights_into(doc, theme, &mut overlays);
+            overlays.extend(Self::doc_script_highlights(doc, theme));
 
             if is_focused {
                 if config.lsp.auto_document_highlight {
@@ -664,6 +665,19 @@ impl EditorView {
         let pos = doc.selection(view.id).primary().cursor(text);
         let pos = helix_core::match_brackets::find_matching_bracket(syntax, text, pos)?;
         Some(OverlayHighlights::single(highlight, pos..pos + 1))
+    }
+
+    pub fn doc_script_highlights(doc: &Document, theme: &Theme) -> Vec<OverlayHighlights> {
+        doc.script_highlights()
+            .values()
+            .filter_map(|group| {
+                let highlight = theme.find_highlight_exact(&group.scope)?;
+                Some(OverlayHighlights::Homogeneous {
+                    highlight,
+                    ranges: group.ranges.clone(),
+                })
+            })
+            .collect()
     }
 
     pub fn tabstop_highlights(doc: &Document, theme: &Theme) -> Option<OverlayHighlights> {

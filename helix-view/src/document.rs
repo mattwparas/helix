@@ -153,6 +153,8 @@ pub struct Document {
     pub(crate) jump_labels: HashMap<ViewId, Vec<Overlay>>,
     /// LSP document highlights for each view, stored as char ranges.
     pub(crate) document_highlights: HashMap<ViewId, DocumentHighlights>,
+    /// Script-defined highlight groups, keyed by namespace string.
+    pub(crate) script_highlights: HashMap<String, ScriptHighlightGroup>,
     /// LSP code action hints for each view.
     pub(crate) code_action_hints: HashSet<ViewId>,
     /// Set to `true` when the document is updated, reset to `false` on the next inlay hints
@@ -251,6 +253,12 @@ pub struct DocumentColorSwatches {
 /// Highlight ranges returned by LSP `textDocument/documentHighlight` for a view.
 #[derive(Debug, Clone, Default)]
 pub struct DocumentHighlights {
+    pub ranges: Vec<std::ops::Range<usize>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScriptHighlightGroup {
+    pub scope: String,
     pub ranges: Vec<std::ops::Range<usize>>,
 }
 
@@ -772,6 +780,7 @@ impl Document {
             readonly: false,
             jump_labels: HashMap::new(),
             document_highlights: HashMap::new(),
+            script_highlights: HashMap::new(),
             code_action_hints: HashSet::new(),
             color_swatches: None,
             document_links: Vec::new(),
@@ -1630,6 +1639,28 @@ impl Document {
             highlights.ranges = updated;
         }
 
+        for group in self.script_highlights.values_mut() {
+            let text_len = self.text.len_chars();
+            let mut updated = Vec::with_capacity(group.ranges.len());
+            for mut range in group.ranges.drain(..) {
+                changes.update_positions(
+                    [
+                        (&mut range.start, Assoc::After),
+                        (&mut range.end, Assoc::After),
+                    ]
+                    .into_iter(),
+                );
+                if range.start >= text_len {
+                    continue;
+                }
+                let end = range.end.min(text_len);
+                if range.start < end {
+                    updated.push(range.start..end);
+                }
+            }
+            group.ranges = updated;
+        }
+
         helix_event::dispatch(DocumentDidChange {
             doc: self,
             view: view_id,
@@ -2472,6 +2503,33 @@ impl Document {
         self.document_highlights
             .get(&view_id)
             .map(|highlights| highlights.ranges.as_slice())
+    }
+
+    pub fn set_script_highlights(
+        &mut self,
+        namespace: String,
+        scope: String,
+        mut ranges: Vec<std::ops::Range<usize>>,
+    ) {
+        if ranges.is_empty() {
+            self.script_highlights.remove(&namespace);
+            return;
+        }
+        ranges.sort_unstable_by_key(|r| r.start);
+        self.script_highlights
+            .insert(namespace, ScriptHighlightGroup { scope, ranges });
+    }
+
+    pub fn clear_script_highlights(&mut self, namespace: &str) {
+        self.script_highlights.remove(namespace);
+    }
+
+    pub fn clear_all_script_highlights(&mut self) {
+        self.script_highlights.clear();
+    }
+
+    pub fn script_highlights(&self) -> &HashMap<String, ScriptHighlightGroup> {
+        &self.script_highlights
     }
 
     pub fn document_highlight_controller(&mut self, view_id: ViewId) -> &mut TaskController {

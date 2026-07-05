@@ -699,7 +699,11 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "current-selection-object", current_selection)
         .register_fn_with_ctx(CTX, "get-helix-cwd", get_helix_cwd)
         .register_fn_with_ctx(CTX, "move-window-far-left", move_window_to_the_left)
-        .register_fn_with_ctx(CTX, "move-window-far-right", move_window_to_the_right);
+        .register_fn_with_ctx(CTX, "move-window-far-right", move_window_to_the_right)
+        .register_fn_with_ctx(CTX, "selection-char-ranges", selection_char_ranges)
+        .register_fn_with_ctx(CTX, "set-document-highlights!", set_script_highlights)
+        .register_fn_with_ctx(CTX, "clear-document-highlights!", clear_script_highlights)
+        .register_fn_with_ctx(CTX, "clear-all-document-highlights!", clear_all_script_highlights);
 
     module
         .register_fn("selection->primary-index", |sel: Selection| {
@@ -4620,6 +4624,68 @@ fn get_highlighted_text(cx: &mut Context) -> String {
 fn current_selection(cx: &mut Context) -> Selection {
     let (view, doc) = current_ref!(cx.editor);
     doc.selection(view.id).clone()
+}
+
+fn selection_char_ranges(cx: &mut Context) -> Vec<(usize, usize)> {
+    let (view, doc) = current_ref!(cx.editor);
+    doc.selection(view.id)
+        .iter()
+        .map(|r| (r.from(), r.to()))
+        .collect()
+}
+
+fn set_script_highlights(
+    cx: &mut Context,
+    namespace: SteelString,
+    ranges: Vec<SteelVal>,
+    scope: SteelString,
+) -> anyhow::Result<()> {
+    let ranges: anyhow::Result<Vec<std::ops::Range<usize>>> = ranges
+        .into_iter()
+        .map(|v| match v {
+            SteelVal::ListV(pair) => {
+                let mut iter = pair.iter();
+                let start = iter
+                    .next()
+                    .and_then(|v| v.as_isize())
+                    .ok_or_else(|| anyhow::anyhow!("range start must be an integer"))?
+                    as usize;
+                let end = iter
+                    .next()
+                    .and_then(|v| v.as_isize())
+                    .ok_or_else(|| anyhow::anyhow!("range end must be an integer"))?
+                    as usize;
+                Ok(start..end)
+            }
+            SteelVal::Pair(pair) => {
+                let start = pair
+                    .car()
+                    .as_isize()
+                    .ok_or_else(|| anyhow::anyhow!("range start must be an integer"))?
+                    as usize;
+                let end = pair
+                    .cdr()
+                    .as_isize()
+                    .ok_or_else(|| anyhow::anyhow!("range end must be an integer"))?
+                    as usize;
+                Ok(start..end)
+            }
+            other => anyhow::bail!("expected (start . end) pair, got {:?}", other),
+        })
+        .collect();
+    let (_, doc) = current!(cx.editor);
+    doc.set_script_highlights(namespace.to_string(), scope.to_string(), ranges?);
+    Ok(())
+}
+
+fn clear_script_highlights(cx: &mut Context, namespace: SteelString) {
+    let (_, doc) = current!(cx.editor);
+    doc.clear_script_highlights(&namespace);
+}
+
+fn clear_all_script_highlights(cx: &mut Context) {
+    let (_, doc) = current!(cx.editor);
+    doc.clear_all_script_highlights();
 }
 
 fn set_selection(cx: &mut Context, selection: Selection) {

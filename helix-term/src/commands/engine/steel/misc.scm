@@ -380,3 +380,35 @@
 ;;keymap : keymap?
 (define (register-steel-mode-keymap! name keymap)
   (helix.register-steel-mode-keymap! name (value->jsexpr-string keymap)))
+
+(provide selection-char-ranges)
+;;@doc
+;;Returns a list of (start . end) char-index pairs for every range in the current selection.
+(define selection-char-ranges helix.selection-char-ranges)
+
+(provide set-document-highlights!)
+;;@doc
+;;Set script-defined highlights for a namespace.
+;;
+;;```scheme
+;;(set-document-highlights! namespace ranges scope)
+;;```
+;;
+;;namespace : string? — unique key for this highlight group (e.g. "yank")
+;;ranges    : (listof (cons int? int?)) — list of (start . end) char-index pairs
+;;scope     : string? — theme scope to use (e.g. "ui.selection", "ui.highlight")
+(define set-document-highlights! helix.set-document-highlights!)
+
+(provide clear-document-highlights!)
+;;@doc
+;;Clear script highlights for the given namespace.
+;;
+;;```scheme
+;;(clear-document-highlights! namespace)
+;;```
+(define clear-document-highlights! helix.clear-document-highlights!)
+
+(provide clear-all-document-highlights!)
+;;@doc
+;;Clear all script highlights on the current document.
+(define clear-all-document-highlights! helix.clear-all-document-highlights!)
