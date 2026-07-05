@@ -38,7 +38,6 @@ events! {
     LspProgressUpdate {
         server_id: LanguageServerId,
         token: String,
-        /// "begin" | "report" | "end"
         kind: String,
         title: Option<String>,
         message: Option<String>,
