@@ -1366,6 +1366,10 @@ pub struct Editor {
     pub editor_clipping: ClippingConfiguration,
 
     pub workspace_trust: WorkspaceTrust,
+
+    /// Active Steel-defined mode name, shown in the statusline instead of the
+    /// normal mode label. `None` means no Steel mode is active.
+    pub steel_mode: Option<String>,
 }
 
 #[derive(Default)]
@@ -1501,6 +1505,7 @@ impl Editor {
             editor_clipping: ClippingConfiguration::default(),
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
             workspace_trust,
+            steel_mode: None,
         }
     }
 

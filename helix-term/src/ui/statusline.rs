@@ -195,6 +195,19 @@ where
 {
     let visible = context.focused;
     let config = context.editor.config();
+
+    if visible {
+        if let Some(name) = context.editor.steel_mode.clone() {
+            let style = if config.color_modes {
+                context.editor.theme.get("ui.statusline.select")
+            } else {
+                Style::default()
+            };
+            write(context, Span::styled(format!(" {} ", name), style));
+            return;
+        }
+    }
+
     let modenames = &config.statusline.mode;
     let mode_str = match context.editor.mode() {
         Mode::Insert => &modenames.insert,
