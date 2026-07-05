@@ -3566,7 +3566,7 @@ fn register_lsp_progress(
     register_hook!(move |event: &mut LspProgressUpdate| {
         let cloned_func = rooted.value().clone();
         let args = [
-            event.server_id.into_steelval().unwrap(),
+            event.server_name.clone().into_steelval().unwrap(),
             event.token.clone().into_steelval().unwrap(),
             event.kind.clone().into_steelval().unwrap(),
             event.title.clone().into_steelval().unwrap(),

@@ -336,7 +336,7 @@
 ;;@doc
 ;; Register a hook that fires on every LSP WorkDoneProgress begin/report/end notification.
 ;; The callback receives six arguments:
-;;   server-id  : integer — the language server ID
+;;   server-name : string  — the language server name
 ;;   token      : string  — the progress token (number or string from the server)
 ;;   kind       : string  — "begin" | "report" | "end"
 ;;   title      : string? — task title (only present on "begin")

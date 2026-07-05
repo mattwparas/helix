@@ -922,6 +922,11 @@ impl Application {
                             token,
                             value: lsp::ProgressParamsValue::WorkDone(work),
                         } = params;
+                        let token_str = match &token {
+                            lsp::NumberOrString::Number(n) => n.to_string(),
+                            lsp::NumberOrString::String(s) => s.clone(),
+                        };
+                        let server_name = language_server!().name().to_string();
                         let (title, message, percentage) = match &work {
                             lsp::WorkDoneProgress::Begin(lsp::WorkDoneProgressBegin {
                                 title,
@@ -944,8 +949,8 @@ impl Application {
                                     }
                                     self.editor.clear_status();
                                     helix_event::dispatch(helix_view::events::LspProgressUpdate {
-                                        server_id,
-                                        token: token.to_string(),
+                                        server_name: server_name.clone(),
+                                        token: token_str.clone(),
                                         kind: "end".to_string(),
                                         title: None,
                                         message: None,
@@ -988,8 +993,8 @@ impl Application {
                                 self.lsp_progress
                                     .begin(server_id, token.clone(), begin_status);
                                 helix_event::dispatch(helix_view::events::LspProgressUpdate {
-                                    server_id,
-                                    token: token.to_string(),
+                                    server_name: server_name.clone(),
+                                    token: token_str.clone(),
                                     kind: "begin".to_string(),
                                     title: fire_title,
                                     message: fire_message,
@@ -1002,8 +1007,8 @@ impl Application {
                                 self.lsp_progress
                                     .update(server_id, token.clone(), report_status);
                                 helix_event::dispatch(helix_view::events::LspProgressUpdate {
-                                    server_id,
-                                    token: token.to_string(),
+                                    server_name: server_name.clone(),
+                                    token: token_str.clone(),
                                     kind: "report".to_string(),
                                     title: None,
                                     message: fire_message,
@@ -1017,8 +1022,8 @@ impl Application {
                                     editor_view.spinners_mut().get_or_create(server_id).stop();
                                 };
                                 helix_event::dispatch(helix_view::events::LspProgressUpdate {
-                                    server_id,
-                                    token: token.to_string(),
+                                    server_name: server_name.clone(),
+                                    token: token_str.clone(),
                                     kind: "end".to_string(),
                                     title: None,
                                     message: fire_message,

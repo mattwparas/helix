@@ -36,7 +36,7 @@ events! {
     }
 
     LspProgressUpdate {
-        server_id: LanguageServerId,
+        server_name: String,
         token: String,
         kind: String,
         title: Option<String>,
