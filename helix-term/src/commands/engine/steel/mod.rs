@@ -427,6 +427,36 @@ fn reset_buffer_extension_keymap() {
     guard.reverse.clear();
 }
 
+/// Per-name keymaps for Steel-defined modes. When a steel mode is active,
+/// `handle_keymap_event_impl` checks this map first; unrecognised keys fall
+/// through to the buffer/extension keymap.
+pub static STEEL_MODE_KEYBINDING_MAP: Lazy<Mutex<HashMap<String, EmbeddedKeyMap>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn set_custom_mode(cx: &mut Context, name: SteelString) {
+    cx.editor.steel_mode = Some(name.to_string());
+}
+
+fn unset_custom_mode(cx: &mut Context) {
+    cx.editor.steel_mode = None;
+}
+
+fn get_custom_mode(cx: &mut Context) -> SteelVal {
+    match cx.editor.steel_mode.as_deref() {
+        Some(s) => SteelVal::StringV(s.into()),
+        None => SteelVal::BoolV(false),
+    }
+}
+
+fn register_steel_mode_keymap(name: SteelString, keymap: String) -> anyhow::Result<()> {
+    let embedded = string_to_embedded_keymap(keymap)?;
+    STEEL_MODE_KEYBINDING_MAP
+        .lock()
+        .unwrap()
+        .insert(name.to_string(), embedded);
+    Ok(())
+}
+
 enum LspKind {
     Call(RootedSteelVal),
     Notification(RootedSteelVal),
@@ -1966,6 +1996,22 @@ impl SteelScriptingEngine {
         cx: &mut Context,
         event: KeyEvent,
     ) -> Option<KeymapResult> {
+        // Steel mode keymaps act as priority overrides: if the active steel mode
+        // has registered a keymap that contains this (mode, key) pair, use it.
+        // Unrecognised keys fall through to the buffer/extension keymap below.
+        if let Some(ref mode_name) = cx.editor.steel_mode.clone() {
+            let km_guard = STEEL_MODE_KEYBINDING_MAP.lock().unwrap();
+            if let Some(keymap) = km_guard.get(mode_name) {
+                if keymap.0.contains_key(&mode) {
+                    let result = editor.keymaps.get_with_map(&keymap.0, mode, event);
+                    drop(km_guard);
+                    if !matches!(result, KeymapResult::NotFound) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+
         let extension = {
             let current_focus = cx.editor.tree.focus;
             let view = cx.editor.tree.get(current_focus);
@@ -4037,7 +4083,11 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "add-inlay-hint", add_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint", remove_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint-by-id", remove_inlay_hint_by_id)
-        .register_fn("fuzzy-match", fuzzy_match);
+        .register_fn("fuzzy-match", fuzzy_match)
+        .register_fn_with_ctx(CTX, "steel-mode", get_custom_mode)
+        .register_fn_with_ctx(CTX, "set-steel-mode!", set_custom_mode)
+        .register_fn_with_ctx(CTX, "unset-steel-mode!", unset_custom_mode)
+        .register_fn("register-steel-mode-keymap!", register_steel_mode_keymap);
 
     if generate_sources {
         generate_module("misc.scm", &builtin_misc_module);
