@@ -35,8 +35,6 @@ events! {
         server_id: LanguageServerId
     }
 
-    /// Fired for every WorkDoneProgress begin/report/end notification.
-    /// Uses owned data so it can be dispatched without holding an Editor borrow.
     LspProgressUpdate {
         server_id: LanguageServerId,
         token: String,
