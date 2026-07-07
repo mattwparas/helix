@@ -1,14 +1,15 @@
 name: Release
 on:
+  workflow_dispatch:
   push:
     tags:
-    - '[0-9]+.[0-9]+'
-    - '[0-9]+.[0-9]+.[0-9]+'
+      - "[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+"
     branches:
-    - 'patch/ci-release-*'
+      - "patch/ci-release-*"
   pull_request:
     paths:
-    - '.github/workflows/release.yml'
+      - ".github/workflows/release.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -60,35 +61,43 @@ jobs:
     strategy:
       fail-fast: false # don't fail other jobs if one fails
       matrix:
-        build: [x86_64-linux, aarch64-linux, x86_64-macos, x86_64-windows, aarch64-macos, aarch64-windows]
+        build:
+          [
+            x86_64-linux,
+            aarch64-linux,
+            x86_64-macos,
+            x86_64-windows,
+            aarch64-macos,
+            aarch64-windows,
+          ]
         include:
-        - build: x86_64-linux
-          # WARN: When changing this to a newer version, make sure that the GLIBC isnt too new, as this can cause issues
-          # with portablity on older systems that dont follow ubuntus more rapid release cadence.
-          os: ubuntu-22.04
-          rust: stable
-          target: x86_64-unknown-linux-gnu
-        - build: aarch64-linux
-          # Version should be kept in lockstep with the x86_64 version
-          os: ubuntu-22.04-arm
-          rust: stable
-          target: aarch64-unknown-linux-gnu
-        - build: x86_64-macos
-          os: macos-latest
-          rust: stable
-          target: x86_64-apple-darwin
-        - build: x86_64-windows
-          os: windows-latest
-          rust: stable
-          target: x86_64-pc-windows-msvc
-        - build: aarch64-macos
-          os: macos-latest
-          rust: stable
-          target: aarch64-apple-darwin
-        - build: aarch64-windows
-          os: windows-11-arm
-          rust: stable
-          target: aarch64-pc-windows-msvc
+          - build: x86_64-linux
+            # WARN: When changing this to a newer version, make sure that the GLIBC isnt too new, as this can cause issues
+            # with portablity on older systems that dont follow ubuntus more rapid release cadence.
+            os: ubuntu-22.04
+            rust: stable
+            target: x86_64-unknown-linux-gnu
+          - build: aarch64-linux
+            # Version should be kept in lockstep with the x86_64 version
+            os: ubuntu-22.04-arm
+            rust: stable
+            target: aarch64-unknown-linux-gnu
+          - build: x86_64-macos
+            os: macos-latest
+            rust: stable
+            target: x86_64-apple-darwin
+          - build: x86_64-windows
+            os: windows-latest
+            rust: stable
+            target: x86_64-pc-windows-msvc
+          - build: aarch64-macos
+            os: macos-latest
+            rust: stable
+            target: aarch64-apple-darwin
+          - build: aarch64-windows
+            os: windows-11-arm
+            rust: stable
+            target: aarch64-pc-windows-msvc
 
     steps:
       - name: Checkout sources
@@ -268,7 +277,7 @@ jobs:
         uses: actions/attest-build-provenance@v4
         if: env.preview == 'false'
         with:
-          subject-path: 'dist/*'
+          subject-path: "dist/*"
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
