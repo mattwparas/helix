@@ -671,7 +671,7 @@ impl EditorView {
         doc.script_highlights()
             .values()
             .filter_map(|group| {
-                let highlight = theme.find_highlight_exact(&group.scope)?;
+                let highlight = theme.find_highlight(&group.scope)?;
                 Some(OverlayHighlights::Homogeneous {
                     highlight,
                     ranges: group.ranges.clone(),
@@ -1694,11 +1694,12 @@ impl Component for EditorView {
             Self::render_bufferline(cx.editor, area.with_height(1), surface);
         }
 
+        let suppress_cursor = cx.editor.steel_terminal_has_focus;
         let views: Vec<(ViewId, bool)> = {
             cx.editor
                 .tree
                 .views()
-                .map(|(view, is_focused)| (view.id, is_focused))
+                .map(|(view, is_focused)| (view.id, if suppress_cursor { false } else { is_focused }))
                 .collect()
         };
         for (view_id, is_focused) in views {

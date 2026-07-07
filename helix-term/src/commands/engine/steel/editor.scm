@@ -318,6 +318,11 @@
 ;;Set the editor clipping at the top.
 (define set-editor-clip-top! helix.set-editor-clip-top!)
 
+(provide set-editor-terminal-has-focus!)
+;;@doc
+;;When true, suppresses helix view cursor rendering so only the PTY cursor is visible.
+(define set-editor-terminal-has-focus! helix.set-editor-terminal-has-focus!)
+
 (provide set-editor-clip-right!)
 ;;@doc
 ;;Set the editor clipping at the right.

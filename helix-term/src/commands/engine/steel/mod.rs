@@ -699,11 +699,7 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "current-selection-object", current_selection)
         .register_fn_with_ctx(CTX, "get-helix-cwd", get_helix_cwd)
         .register_fn_with_ctx(CTX, "move-window-far-left", move_window_to_the_left)
-        .register_fn_with_ctx(CTX, "move-window-far-right", move_window_to_the_right)
-        .register_fn_with_ctx(CTX, "selection-char-ranges", selection_char_ranges)
-        .register_fn_with_ctx(CTX, "set-document-highlights!", set_script_highlights)
-        .register_fn_with_ctx(CTX, "clear-document-highlights!", clear_script_highlights)
-        .register_fn_with_ctx(CTX, "clear-all-document-highlights!", clear_all_script_highlights);
+        .register_fn_with_ctx(CTX, "move-window-far-right", move_window_to_the_right);
 
     module
         .register_fn("selection->primary-index", |sel: Selection| {
@@ -1557,6 +1553,13 @@ fn load_editor_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "editor->text", document_id_to_text)
         .register_fn_with_ctx(CTX, "editor-document->path", document_path)
         .register_fn_with_ctx(CTX, "register->value", cx_register_value)
+        .register_fn_with_ctx(
+            CTX,
+            "set-editor-terminal-has-focus!",
+            |cx: &mut Context, focused: bool| {
+                cx.editor.steel_terminal_has_focus = focused;
+            },
+        )
         .register_fn_with_ctx(
             CTX,
             "set-editor-clip-right!",
@@ -4091,7 +4094,11 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "steel-mode", get_custom_mode)
         .register_fn_with_ctx(CTX, "set-steel-mode!", set_custom_mode)
         .register_fn_with_ctx(CTX, "unset-steel-mode!", unset_custom_mode)
-        .register_fn("register-steel-mode-keymap!", register_steel_mode_keymap);
+        .register_fn("register-steel-mode-keymap!", register_steel_mode_keymap)
+        .register_fn_with_ctx(CTX, "selection-char-ranges", selection_char_ranges)
+        .register_fn_with_ctx(CTX, "set-document-highlights!", set_script_highlights)
+        .register_fn_with_ctx(CTX, "clear-document-highlights!", clear_script_highlights)
+        .register_fn_with_ctx(CTX, "clear-all-document-highlights!", clear_all_script_highlights);
 
     if generate_sources {
         generate_module("misc.scm", &builtin_misc_module);
@@ -4534,6 +4541,53 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
 
             for file in values {
                 if injector.push(PathBuf::from(file)).is_err() {
+                    break;
+                }
+            }
+
+            WrappedDynComponent {
+                inner: Some(Box::new(ui::overlay::overlaid(picker))),
+            }
+        },
+    );
+
+    // String picker: like #%exp-picker but items are arbitrary strings, not file paths.
+    // The callback receives the selected string as its sole argument.
+    engine.register_fn(
+        "#%string-picker",
+        |values: Vec<String>, callback_fn: SteelVal| -> WrappedDynComponent {
+            let columns = [PickerColumn::new("item", |item: &String, _: &()| {
+                item.as_str().into()
+            })];
+
+            let rooted = callback_fn.as_rooted();
+
+            let picker = ui::Picker::new(columns, 0, [], (), move |cx, item: &String, _action| {
+                let selected = item.clone();
+                with_ephemeral_context(cx, |ctx| {
+                    let cloned_func = rooted.value();
+                    enter_engine(|guard| {
+                        if let Err(e) = guard
+                            .with_mut_reference::<Context, Context>(ctx)
+                            .consume_once(move |engine, args| {
+                                let context = args.into_iter().next().unwrap();
+                                engine.update_value(CTX, context);
+                                engine.call_function_with_args(
+                                    cloned_func.clone(),
+                                    vec![SteelVal::StringV(selected.into())],
+                                )
+                            })
+                        {
+                            present_error_inside_engine_context(ctx, guard, e);
+                        }
+                    });
+                });
+            });
+
+            let injector = picker.injector();
+
+            for item in values {
+                if injector.push(item).is_err() {
                     break;
                 }
             }

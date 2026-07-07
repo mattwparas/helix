@@ -1365,6 +1365,10 @@ pub struct Editor {
 
     pub editor_clipping: ClippingConfiguration,
 
+    /// When true, a Steel terminal component has focus; helix views render without
+    /// a focused-cursor highlight so only the PTY cursor is visible.
+    pub steel_terminal_has_focus: bool,
+
     pub workspace_trust: WorkspaceTrust,
 
     /// Active Steel-defined mode name, shown in the statusline instead of the
@@ -1503,6 +1507,7 @@ impl Editor {
             mouse_down_range: None,
             cursor_cache: CursorCache::default(),
             editor_clipping: ClippingConfiguration::default(),
+            steel_terminal_has_focus: false,
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
             workspace_trust,
             steel_mode: None,
