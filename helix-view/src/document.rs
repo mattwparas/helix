@@ -308,6 +308,13 @@ pub struct DocumentInlayHints {
     /// added first, then the regular inlay hints, then the `after` padding.
     pub padding_before_inlay_hints: Vec<InlineAnnotation>,
     pub padding_after_inlay_hints: Vec<InlineAnnotation>,
+
+    /// Inlay hints with an explicit theme scope, used by plugins for custom
+    /// per-hint coloring (e.g. crates.hx). Parallel to `scoped_inlay_hint_scopes`;
+    /// each scope name is resolved to a highlight at render time so the color
+    /// tracks theme changes.
+    pub scoped_inlay_hints: Vec<InlineAnnotation>,
+    pub scoped_inlay_hint_scopes: Vec<String>,
 }
 
 impl DocumentInlayHints {
@@ -320,6 +327,8 @@ impl DocumentInlayHints {
             other_inlay_hints: Vec::new(),
             padding_before_inlay_hints: Vec::new(),
             padding_after_inlay_hints: Vec::new(),
+            scoped_inlay_hints: Vec::new(),
+            scoped_inlay_hint_scopes: Vec::new(),
         }
     }
 }
@@ -1608,6 +1617,8 @@ impl Document {
                 other_inlay_hints,
                 padding_before_inlay_hints,
                 padding_after_inlay_hints,
+                scoped_inlay_hints,
+                scoped_inlay_hint_scopes: _,
             } = text_annotation;
 
             apply_inlay_hint_changes(padding_before_inlay_hints);
@@ -1615,6 +1626,7 @@ impl Document {
             apply_inlay_hint_changes(parameter_inlay_hints);
             apply_inlay_hint_changes(other_inlay_hints);
             apply_inlay_hint_changes(padding_after_inlay_hints);
+            apply_inlay_hint_changes(scoped_inlay_hints);
         }
 
         for highlights in self.document_highlights.values_mut() {

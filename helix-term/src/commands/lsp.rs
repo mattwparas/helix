@@ -1476,6 +1476,8 @@ fn compute_inlay_hints_for_view(
                     other_inlay_hints,
                     padding_before_inlay_hints,
                     padding_after_inlay_hints,
+                    scoped_inlay_hints: Vec::new(),
+                    scoped_inlay_hint_scopes: Vec::new(),
                 },
             );
             doc.inlay_hints_oudated = false;

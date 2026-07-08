@@ -4089,6 +4089,7 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "await-callback", await_value)
         .register_fn_with_ctx(CTX, "add-inlay-hint", add_inlay_hint)
         .register_fn_with_ctx(CTX, "add-typed-inlay-hint", add_typed_inlay_hint)
+        .register_fn_with_ctx(CTX, "add-scoped-inlay-hint", add_scoped_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint", remove_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint-by-id", remove_inlay_hint_by_id)
         .register_fn("fuzzy-match", fuzzy_match)
@@ -5738,6 +5739,47 @@ pub fn add_typed_inlay_hint(
         "parameter" => new_inlay_hints.parameter_inlay_hints.push(annotation),
         _           => new_inlay_hints.other_inlay_hints.push(annotation),
     }
+
+    let id = new_inlay_hints.id;
+    doc.set_inlay_hints(view_id, new_inlay_hints);
+    Some((id.first_line, id.last_line))
+}
+
+/// Add an inlay hint styled by an explicit theme scope (e.g. "diff.plus",
+/// "diagnostic.warning"). The scope is resolved to a highlight at render time,
+/// so the color follows the active theme — unlike add-typed-inlay-hint, which
+/// is limited to the fixed ui.virtual.inlay-hint.{type,parameter} scopes.
+pub fn add_scoped_inlay_hint(
+    cx: &mut Context,
+    char_index: usize,
+    completion: SteelString,
+    scope: SteelString,
+) -> Option<(usize, usize)> {
+    let view_id = cx.editor.tree.focus;
+    if !cx.editor.tree.contains(view_id) {
+        return None;
+    }
+    let view = cx.editor.tree.get(view_id);
+    let doc_id = cx.editor.tree.get(view_id).doc;
+    let doc = cx.editor.documents.get_mut(&doc_id)?;
+    let mut new_inlay_hints = doc.inlay_hints(view_id).cloned().unwrap_or_else(|| {
+        let doc_text = doc.text();
+        let len_lines = doc_text.len_lines();
+        let view_height = view.inner_height();
+        let first_visible_line =
+            doc_text.char_to_line(doc.view_offset(view_id).anchor.min(doc_text.len_chars()));
+        let first_line = first_visible_line.saturating_sub(view_height);
+        let last_line = first_visible_line
+            .saturating_add(view_height.saturating_mul(2))
+            .min(len_lines);
+        DocumentInlayHints::empty_with_id(DocumentInlayHintsId { first_line, last_line })
+    });
+
+    let annotation = InlineAnnotation::new(char_index, completion.to_string());
+    new_inlay_hints.scoped_inlay_hints.push(annotation);
+    new_inlay_hints
+        .scoped_inlay_hint_scopes
+        .push(scope.to_string());
 
     let id = new_inlay_hints.id;
     doc.set_inlay_hints(view_id, new_inlay_hints);
