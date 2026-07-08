@@ -4088,6 +4088,7 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "helix-await-callback", await_value)
         .register_fn_with_ctx(CTX, "await-callback", await_value)
         .register_fn_with_ctx(CTX, "add-inlay-hint", add_inlay_hint)
+        .register_fn_with_ctx(CTX, "add-typed-inlay-hint", add_typed_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint", remove_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint-by-id", remove_inlay_hint_by_id)
         .register_fn("fuzzy-match", fuzzy_match)
@@ -5698,6 +5699,48 @@ pub fn add_inlay_hint(
 
     doc.set_inlay_hints(view_id, new_inlay_hints);
 
+    Some((id.first_line, id.last_line))
+}
+
+// "add-typed-inlay-hint" — like add-inlay-hint but kind selects the theme scope:
+//   "type"      → ui.virtual.inlay-hint.type
+//   "parameter" → ui.virtual.inlay-hint.parameter
+//   anything else → ui.virtual.inlay-hint (same as add-inlay-hint)
+pub fn add_typed_inlay_hint(
+    cx: &mut Context,
+    char_index: usize,
+    completion: SteelString,
+    kind: SteelString,
+) -> Option<(usize, usize)> {
+    let view_id = cx.editor.tree.focus;
+    if !cx.editor.tree.contains(view_id) {
+        return None;
+    }
+    let view = cx.editor.tree.get(view_id);
+    let doc_id = cx.editor.tree.get(view_id).doc;
+    let doc = cx.editor.documents.get_mut(&doc_id)?;
+    let mut new_inlay_hints = doc.inlay_hints(view_id).cloned().unwrap_or_else(|| {
+        let doc_text = doc.text();
+        let len_lines = doc_text.len_lines();
+        let view_height = view.inner_height();
+        let first_visible_line =
+            doc_text.char_to_line(doc.view_offset(view_id).anchor.min(doc_text.len_chars()));
+        let first_line = first_visible_line.saturating_sub(view_height);
+        let last_line = first_visible_line
+            .saturating_add(view_height.saturating_mul(2))
+            .min(len_lines);
+        DocumentInlayHints::empty_with_id(DocumentInlayHintsId { first_line, last_line })
+    });
+
+    let annotation = InlineAnnotation::new(char_index, completion.to_string());
+    match kind.as_str() {
+        "type"      => new_inlay_hints.type_inlay_hints.push(annotation),
+        "parameter" => new_inlay_hints.parameter_inlay_hints.push(annotation),
+        _           => new_inlay_hints.other_inlay_hints.push(annotation),
+    }
+
+    let id = new_inlay_hints.id;
+    doc.set_inlay_hints(view_id, new_inlay_hints);
     Some((id.first_line, id.last_line))
 }
 
