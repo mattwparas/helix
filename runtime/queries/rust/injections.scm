@@ -35,7 +35,7 @@
        (identifier) @_macro_name
      ]
    (token_tree) @injection.content)
- (#any-of? @_macro_name "view" "html_view")
+ (#any-of? @_macro_name "view" "html_view" "rsx")
  (#set! injection.language "rstml")
  (#set! injection.include-children))
 
