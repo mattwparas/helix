@@ -4284,6 +4284,15 @@ fn fuzzy_match(pattern: SteelString, items: SteelVal) -> Vec<SteelVal> {
     Vec::new()
 }
 
+/// A row for `#%location-picker`: a display label plus a file location to
+/// preview (and jump to) at a line range.
+struct LocationRow {
+    label: String,
+    path: PathBuf,
+    line_start: usize,
+    line_end: usize,
+}
+
 fn configure_engine_impl(mut engine: Engine) -> Engine {
     log::info!("Loading engine!");
 
@@ -4593,6 +4602,62 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
                     break;
                 }
             }
+
+            WrappedDynComponent {
+                inner: Some(Box::new(ui::overlay::overlaid(picker))),
+            }
+        },
+    );
+
+    // Location picker: native picker over (label, path, line-start, line-end)
+    // rows. Previews the file scrolled to and highlighting the line range, and
+    // on selection opens the file and jumps to it. Same look/behaviour as the
+    // built-in diagnostics / global-search pickers.
+    engine.register_fn(
+        "#%location-picker",
+        |labels: Vec<String>,
+         paths: Vec<String>,
+         line_starts: Vec<usize>,
+         line_ends: Vec<usize>|
+         -> WrappedDynComponent {
+            let rows: Vec<LocationRow> = labels
+                .into_iter()
+                .zip(paths)
+                .zip(line_starts)
+                .zip(line_ends)
+                .map(|(((label, path), line_start), line_end)| LocationRow {
+                    label,
+                    path: PathBuf::from(path),
+                    line_start,
+                    line_end,
+                })
+                .collect();
+
+            let columns = [PickerColumn::new("location", |row: &LocationRow, _: &()| {
+                row.label.as_str().into()
+            })];
+
+            let picker = ui::Picker::new(columns, 0, rows, (), move |cx, row: &LocationRow, action| {
+                if let Err(e) = cx.editor.open(&row.path, action) {
+                    cx.editor
+                        .set_error(format!("Failed to open '{}': {}", row.path.display(), e));
+                    return;
+                }
+                let (view, doc) = current!(cx.editor);
+                let text = doc.text();
+                if row.line_start >= text.len_lines() {
+                    return;
+                }
+                let start = text.line_to_char(row.line_start);
+                let end = text.line_to_char((row.line_end + 1).min(text.len_lines()));
+                doc.set_selection(view.id, Selection::single(start, end));
+                if action.align_view(view, doc.id()) {
+                    helix_view::align_view(doc, view, helix_view::Align::Center);
+                }
+            })
+            .with_preview(|_editor, row: &LocationRow| {
+                Some((PathOrId::Path(row.path.as_path()), Some((row.line_start, row.line_end))))
+            });
 
             WrappedDynComponent {
                 inner: Some(Box::new(ui::overlay::overlaid(picker))),
