@@ -989,6 +989,67 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             // of an open document matches what's shown in the buffer.
             overlay_highlights.extend(EditorView::doc_script_highlights(doc, &cx.editor.theme));
 
+            // Merge-conflict marker highlighting, computed from the previewed text so
+            // it works even for files that are not open (e.g. a conflicts-file picker).
+            // Colours the "ours" and "theirs" regions the same as the diff scopes.
+            fn conflict_regions(
+                text: helix_core::RopeSlice,
+            ) -> (Vec<std::ops::Range<usize>>, Vec<std::ops::Range<usize>>) {
+                fn line_is_marker(line: helix_core::RopeSlice, ch: char) -> bool {
+                    let mut chars = line.chars();
+                    for _ in 0..7 {
+                        if chars.next() != Some(ch) {
+                            return false;
+                        }
+                    }
+                    let rest: String = chars.collect();
+                    rest.trim().is_empty() || rest.starts_with(' ')
+                }
+                let (mut ours, mut theirs) = (Vec::new(), Vec::new());
+                let n = text.len_lines();
+                let (mut start, mut sep): (Option<usize>, Option<usize>) = (None, None);
+                for i in 0..n {
+                    let line = text.line(i);
+                    if line_is_marker(line, '<') {
+                        start = Some(i);
+                        sep = None;
+                    } else if start.is_some() && sep.is_none() && line_is_marker(line, '=') {
+                        sep = Some(i);
+                    } else if let (Some(s), Some(se)) = (start, sep) {
+                        if line_is_marker(line, '>') {
+                            ours.push(text.line_to_char(s)..text.line_to_char(se));
+                            let end = if i + 1 < n {
+                                text.line_to_char(i + 1)
+                            } else {
+                                text.len_chars()
+                            };
+                            theirs.push(text.line_to_char(se)..end);
+                            start = None;
+                            sep = None;
+                        }
+                    }
+                }
+                (ours, theirs)
+            }
+
+            let (ours_ranges, theirs_ranges) = conflict_regions(doc.text().slice(..));
+            if !ours_ranges.is_empty() {
+                if let Some(highlight) = cx.editor.theme.find_highlight("diff.plus") {
+                    overlay_highlights.push(helix_core::syntax::OverlayHighlights::Homogeneous {
+                        highlight,
+                        ranges: ours_ranges,
+                    });
+                }
+            }
+            if !theirs_ranges.is_empty() {
+                if let Some(highlight) = cx.editor.theme.find_highlight("diff.delta") {
+                    overlay_highlights.push(helix_core::syntax::OverlayHighlights::Homogeneous {
+                        highlight,
+                        ranges: theirs_ranges,
+                    });
+                }
+            }
+
             let mut decorations = DecorationManager::default();
 
             if let Some((start, end)) = range {
