@@ -985,6 +985,10 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                 &mut overlay_highlights,
             );
 
+            // Script-defined highlights (e.g. git-conflict ours/theirs) so a preview
+            // of an open document matches what's shown in the buffer.
+            overlay_highlights.extend(EditorView::doc_script_highlights(doc, &cx.editor.theme));
+
             let mut decorations = DecorationManager::default();
 
             if let Some((start, end)) = range {
