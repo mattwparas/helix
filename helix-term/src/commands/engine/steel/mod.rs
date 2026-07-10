@@ -4618,7 +4618,8 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
         |labels: Vec<String>,
          paths: Vec<String>,
          line_starts: Vec<usize>,
-         line_ends: Vec<usize>|
+         line_ends: Vec<usize>,
+         callback_fn: SteelVal|
          -> WrappedDynComponent {
             let rows: Vec<LocationRow> = labels
                 .into_iter()
@@ -4637,23 +4638,41 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
                 row.label.as_str().into()
             })];
 
+            let rooted = callback_fn.as_rooted();
             let picker = ui::Picker::new(columns, 0, rows, (), move |cx, row: &LocationRow, action| {
                 if let Err(e) = cx.editor.open(&row.path, action) {
                     cx.editor
                         .set_error(format!("Failed to open '{}': {}", row.path.display(), e));
                     return;
                 }
-                let (view, doc) = current!(cx.editor);
-                let text = doc.text();
-                if row.line_start >= text.len_lines() {
-                    return;
+                {
+                    let (view, doc) = current!(cx.editor);
+                    let text = doc.text();
+                    if row.line_start < text.len_lines() {
+                        let start = text.line_to_char(row.line_start);
+                        let end = text.line_to_char((row.line_end + 1).min(text.len_lines()));
+                        doc.set_selection(view.id, Selection::single(start, end));
+                        if action.align_view(view, doc.id()) {
+                            helix_view::align_view(doc, view, helix_view::Align::Center);
+                        }
+                    }
                 }
-                let start = text.line_to_char(row.line_start);
-                let end = text.line_to_char((row.line_end + 1).min(text.len_lines()));
-                doc.set_selection(view.id, Selection::single(start, end));
-                if action.align_view(view, doc.id()) {
-                    helix_view::align_view(doc, view, helix_view::Align::Center);
-                }
+                // Run the Steel callback (no args) after the jump.
+                with_ephemeral_context(cx, |ctx| {
+                    let cloned_func = rooted.value();
+                    enter_engine(|guard| {
+                        if let Err(e) = guard
+                            .with_mut_reference::<Context, Context>(ctx)
+                            .consume_once(move |engine, args| {
+                                let context = args.into_iter().next().unwrap();
+                                engine.update_value(CTX, context);
+                                engine.call_function_with_args(cloned_func.clone(), Vec::new())
+                            })
+                        {
+                            present_error_inside_engine_context(ctx, guard, e);
+                        }
+                    });
+                });
             })
             .with_preview(|_editor, row: &LocationRow| {
                 Some((PathOrId::Path(row.path.as_path()), Some((row.line_start, row.line_end))))
