@@ -4650,8 +4650,7 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
                     let text = doc.text();
                     if row.line_start < text.len_lines() {
                         let start = text.line_to_char(row.line_start);
-                        let end = text.line_to_char((row.line_end + 1).min(text.len_lines()));
-                        doc.set_selection(view.id, Selection::single(start, end));
+                        doc.set_selection(view.id, Selection::point(start));
                         if action.align_view(view, doc.id()) {
                             helix_view::align_view(doc, view, helix_view::Align::Center);
                         }
