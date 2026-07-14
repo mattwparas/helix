@@ -195,7 +195,10 @@ fn handle_document_change(
     let mtime = match path.metadata() {
         Ok(meta) => meta.modified().unwrap_or(SystemTime::now()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => return,
-        Err(_) => SystemTime::now(),
+        // On a transient error (permissions, flaky mount) skip this tick rather than
+        // fabricate a fresh `now()` mtime, which would never match `last_saved_time`
+        // and would re-trigger a false "changed externally" prompt on every poll.
+        Err(_) => return,
     };
 
     if mtime == doc.last_saved_time {

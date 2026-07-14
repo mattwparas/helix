@@ -24,12 +24,14 @@ pub fn events_from_paths(paths: impl IntoIterator<Item = PathBuf>) -> Events {
     use filesentry::CanonicalPathBuf;
     let events: Vec<Event> = paths
         .into_iter()
-        .filter_map(|path| {
-            let canonical = path.canonicalize().ok()?;
-            Some(Event {
+        .map(|path| {
+            // A deleted path can no longer be canonicalized; fall back to the raw path
+            // so deletions still produce an event instead of being silently dropped.
+            let canonical = path.canonicalize().unwrap_or(path);
+            Event {
                 path: CanonicalPathBuf::assert_canonicalized(&canonical),
                 ty: EventType::Modified,
-            })
+            }
         })
         .collect();
     Events::from(events)
@@ -48,16 +50,16 @@ pub struct Config {
     /// Defaults to `true`
     pub require_workspace: bool,
     /// Enables ignoring hidden files.
-    /// Whether to hide hidden files in file picker and global search results. Defaults to true.
+    /// Whether to skip watching hidden files/directories. Defaults to true.
     pub hidden: bool,
     /// Enables reading `.ignore` files.
-    /// Whether to hide files listed in .ignore in file picker and global search results. Defaults to true.
+    /// Whether to skip watching files listed in `.ignore`. Defaults to true.
     pub ignore: bool,
     /// Enables reading `.gitignore` files.
-    /// Whether to hide files listed in .gitignore in file picker and global search results. Defaults to true.
+    /// Whether to skip watching files listed in `.gitignore`. Defaults to true.
     pub git_ignore: bool,
     /// Enables reading global .gitignore, whose path is specified in git's config: `core.excludefile` option.
-    /// Whether to hide files listed in global .gitignore in file picker and global search results. Defaults to true.
+    /// Whether to skip watching files listed in the global .gitignore. Defaults to true.
     pub git_global: bool,
     // /// Enables reading `.git/info/exclude` files.
     // /// Whether to hide files listed in .git/info/exclude in file picker and global search results. Defaults to true.

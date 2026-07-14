@@ -1727,6 +1727,9 @@ impl Editor {
             return Ok(());
         }
         let is_dir = old_path.is_dir();
+        // `is_watching` canonicalizes via the filesystem, which fails once `old_path`
+        // has been renamed away, so capture its watched state before the rename below.
+        let old_path_watched = self.file_watcher.is_watching(old_path);
         let language_servers: Vec<_> = self
             .language_servers
             .iter_clients()
@@ -1766,11 +1769,12 @@ impl Editor {
             ls.did_rename(old_path, &new_path, is_dir);
         }
 
-        if !self.file_watcher.is_watching(old_path) {
+        if !old_path_watched {
             self.language_servers
                 .file_event_handler
                 .file_changed(old_path.to_owned());
         }
+        // `new_path` exists after the rename, so `is_watching` can be evaluated here.
         if !self.file_watcher.is_watching(&new_path) {
             self.language_servers
                 .file_event_handler
@@ -1832,6 +1836,9 @@ impl Editor {
     pub fn delete_path(&mut self, path: &Path, recursive: bool) -> io::Result<()> {
         let path = canonicalize(path);
         let is_dir = path.is_dir();
+        // `is_watching` canonicalizes via the filesystem, which fails once `path` has
+        // been removed below, so capture its watched state before the deletion.
+        let path_watched = self.file_watcher.is_watching(&path);
         let language_servers: Vec<_> = self
             .language_servers
             .iter_clients()
@@ -1871,9 +1878,9 @@ impl Editor {
             ls.did_delete(&path, is_dir);
         }
         // The native watcher reports workspace changes on its own; only notify the
-        // file-event handler manually when the path isn't already covered, to avoid
+        // file-event handler manually when the path wasn't already covered, to avoid
         // double-reporting to language servers.
-        if !self.file_watcher.is_watching(&path) {
+        if !path_watched {
             self.language_servers.file_event_handler.file_changed(path);
         }
         Ok(())

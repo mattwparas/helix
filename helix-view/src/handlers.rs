@@ -71,14 +71,18 @@ pub fn register_hooks(handlers: &Handlers) {
     word_index::register_hooks(handlers);
     // must be done here because the file watcher is in helix-core
     register_hook!(move |event: &mut ConfigDidChange<'_>| {
-        event.editor.file_watcher.reload(&event.new.file_watcher);
-        // Update extra watched paths from VCS providers (e.g., external HEAD files for worktrees)
-        let (workspace, _) = helix_loader::find_workspace();
-        let extra_paths = event.editor.diff_providers.get_watched_paths(&workspace);
-        event
-            .editor
-            .file_watcher
-            .set_extra_watched_paths(extra_paths);
+        // ConfigDidChange fires on every runtime config change; only touch the watcher
+        // (which re-reads ignore files) when its own settings actually changed.
+        if event.old.file_watcher != event.new.file_watcher {
+            event.editor.file_watcher.reload(&event.new.file_watcher);
+            // Update extra watched paths from VCS providers (e.g., external HEAD files for worktrees)
+            let (workspace, _) = helix_loader::find_workspace();
+            let extra_paths = event.editor.diff_providers.get_watched_paths(&workspace);
+            event
+                .editor
+                .file_watcher
+                .set_extra_watched_paths(extra_paths);
+        }
         Ok(())
     });
 }
