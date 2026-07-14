@@ -197,7 +197,12 @@ pub struct Document {
 
     // Last time we wrote to the file. This will carry the time the file was last opened if there
     // were no saves.
-    last_saved_time: SystemTime,
+    pub last_saved_time: SystemTime,
+
+    /// On-disk mtime of the last external change auto-reload already surfaced for
+    /// this document (prompt/warning). Lets it show the conflict once instead of
+    /// re-prompting on every poll/focus check while the buffer stays modified.
+    pub auto_reload_seen_mtime: Option<SystemTime>,
 
     last_saved_revision: usize,
     version: i32, // should be usize?
@@ -206,7 +211,7 @@ pub struct Document {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) language_servers: HashMap<LanguageServerName, Arc<Client>>,
 
-    diff_handle: Option<DiffHandle>,
+    pub diff_handle: Option<DiffHandle>,
     version_control_head: Option<Arc<ArcSwap<Box<str>>>>,
 
     // when document was used for most-recent-used buffer picker
@@ -761,6 +766,7 @@ impl Document {
             history: Cell::new(History::default()),
             savepoints: Vec::new(),
             last_saved_time: SystemTime::now(),
+            auto_reload_seen_mtime: None,
             last_saved_revision: 0,
             modified_since_accessed: false,
             language_servers: HashMap::new(),

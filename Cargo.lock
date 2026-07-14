@@ -779,6 +779,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "ecow"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78e4f79b296fbaab6ce2e22d52cb4c7f010fe0ebe7a32e34fa25885fd797bd02"
+
+[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -866,6 +872,25 @@ dependencies = [
  "rkyv",
  "serde",
  "simdutf8",
+]
+
+[[package]]
+name = "filesentry"
+version = "0.2.2"
+source = "git+https://github.com/helix-editor/filesentry?rev=9d594d545c47f5386b6410efcc36868c7d5e55bd#9d594d545c47f5386b6410efcc36868c7d5e55bd"
+dependencies = [
+ "bitflags 2.13.0",
+ "core-foundation-sys",
+ "ecow",
+ "hashbrown 0.15.5",
+ "ignore",
+ "log",
+ "memchr",
+ "mio",
+ "papaya",
+ "rustix 1.1.4",
+ "walkdir",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1781,9 +1806,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "globset"
-version = "0.4.18"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52dfc19153a48bde0cbd630453615c8151bce3a5adfac7a0aebfbf0a1e1f57e3"
+checksum = "54a1028dfc5f5df5da8a56a73e6c153c9a9708ec57232470703592a3f18e49f5"
 dependencies = [
  "aho-corasick",
  "bstr",
@@ -1918,11 +1943,14 @@ dependencies = [
  "bitflags 2.13.0",
  "chrono",
  "encoding_rs",
+ "filesentry",
  "foldhash 0.2.0",
  "globset",
+ "helix-event",
  "helix-loader",
  "helix-parsec",
  "helix-stdx",
+ "ignore",
  "imara-diff",
  "indoc",
  "log",
@@ -2019,6 +2047,7 @@ dependencies = [
  "futures-util",
  "globset",
  "helix-core",
+ "helix-event",
  "helix-loader",
  "helix-lsp-types",
  "helix-stdx",
@@ -2144,6 +2173,7 @@ dependencies = [
  "gix",
  "helix-core",
  "helix-event",
+ "helix-stdx",
  "imara-diff",
  "log",
  "parking_lot",
@@ -2326,9 +2356,9 @@ dependencies = [
 
 [[package]]
 name = "ignore"
-version = "0.4.26"
+version = "0.4.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b915661dd01db3f05050265b2477bcc6527b3792388e2749b41623cc592be67d"
+checksum = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
 dependencies = [
  "crossbeam-deque",
  "globset",
@@ -2830,6 +2860,16 @@ checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "papaya"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "997ee03cd38c01469a7046643714f0ad28880bcb9e6679ff0666e24817ca19b7"
+dependencies = [
+ "equivalent",
+ "seize",
 ]
 
 [[package]]
@@ -3352,6 +3392,16 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "seize"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "semver"

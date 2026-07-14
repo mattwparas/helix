@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use arc_swap::ArcSwap;
 use gix::filter::plumbing::driver::apply::Delay;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gix::bstr::ByteSlice;
@@ -91,6 +91,19 @@ pub fn for_each_changed_file(
     f: impl Fn(Result<FileChange>) -> bool,
 ) -> Result<()> {
     status(&open_repo(cwd, trust_full)?.to_thread_local(), f)
+}
+
+/// Get the path to the HEAD file for the git repository containing the given path.
+/// This properly handles both regular repositories and worktrees.
+pub fn get_head_path(path: &Path) -> Option<PathBuf> {
+    // Read-only path resolution for the watcher; open with reduced trust.
+    let repo = open_repo(path, false).ok()?.to_thread_local();
+    // git_dir() returns the path to the actual git directory
+    // For regular repos: /path/to/repo/.git
+    // For worktrees: /path/to/main/.git/worktrees/<name>
+    let git_dir = repo.git_dir();
+    let head_path = git_dir.join("HEAD");
+    head_path.exists().then_some(head_path)
 }
 
 fn open_repo(path: &Path, trust_full: bool) -> Result<ThreadSafeRepository> {

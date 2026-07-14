@@ -19,8 +19,10 @@ steel = ["dep:steel-core"]
 [dependencies]
 helix-stdx = { path = "../helix-stdx" }
 helix-loader = { path = "../helix-loader" }
+helix-event = { path = "../helix-event" }
 helix-parsec = { path = "../helix-parsec" }
 
+ignore.workspace = true
 ropey.workspace = true
 smallvec = "1.15"
 smartstring = "1.0.1"
@@ -58,6 +60,10 @@ nucleo.workspace = true
 parking_lot.workspace = true
 globset.workspace = true
 regex-cursor = "0.1.5"
+
+# Pinned to a rev where the macOS (FSEvents) and Windows backends pass CI.
+# The PR (#14544) pinned 57713a3e, where macOS/Windows CI were still red.
+filesentry = { git = "https://github.com/helix-editor/filesentry", rev = "9d594d545c47f5386b6410efcc36868c7d5e55bd" }
 
 [dev-dependencies]
 quickcheck.workspace = true
