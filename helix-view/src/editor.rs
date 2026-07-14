@@ -2561,8 +2561,8 @@ impl Editor {
         }
     }
 
-    /// Closes language servers with timeout. The default timeout is 10000 ms, use
-    /// `timeout` parameter to override this.
+    /// Closes language servers, waiting up to `timeout` ms (default 200) for the
+    /// `exit` notifications to flush to each server's stdin.
     pub async fn close_language_servers(&self, timeout: Option<u64>) {
         // Remove all language servers from the file event handler.
         // Note: this is non-blocking.
@@ -2580,15 +2580,20 @@ impl Editor {
         // Wait until shutdown+exit have actually been written to each server's stdin
         // before the runtime (and the pipes) are torn down, so well-behaved servers
         // can act on `exit` before kill_on_drop reaps them. This waits only on our
-        // own outbound write -- not on any server response -- so a slow server (e.g.
-        // gopls flushing logs) doesn't delay it. Capped so a wedged write can't hang
-        // the quit.
-        let cap = Duration::from_millis(timeout.unwrap_or(1000));
-        let _ = tokio::time::timeout(cap, async {
-            for client in self.language_servers.iter_clients() {
-                client.wait_shutdown_flushed().await;
-            }
-        })
+        // own outbound write, but a server that has stopped reading its stdin (e.g.
+        // rust-analyzer mid-index) still stalls that write via pipe backpressure, so
+        // the cap keeps `:q` snappy: at expiry the pipes are torn down and the server
+        // is reaped by kill_on_drop. The waits run concurrently so the cap bounds the
+        // total wait regardless of how many servers are attached.
+        let cap = Duration::from_millis(timeout.unwrap_or(200));
+        let _ = tokio::time::timeout(
+            cap,
+            futures_util::future::join_all(
+                self.language_servers
+                    .iter_clients()
+                    .map(|client| client.wait_shutdown_flushed()),
+            ),
+        )
         .await;
     }
 
