@@ -1326,6 +1326,7 @@ fn load_theme_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn("add-theme!", add_theme)
         .register_fn("theme-style", get_style)
         .register_fn("theme-set-style!", set_style)
+        .register_fn("theme-set-name!", set_theme_name)
         .register_fn("string->color", string_to_color)
         .register_fn_with_ctx(CTX, "get-theme", get_theme)
         .register_fn_with_ctx(CTX, "current-theme", current_theme)
@@ -1408,6 +1409,12 @@ fn get_style(theme: &SteelTheme, name: SteelString) -> helix_view::theme::Style 
 
 fn set_style(theme: &mut SteelTheme, name: String, style: helix_view::theme::Style) {
     theme.0.set(name, style)
+}
+
+// Rename a cloned theme so it registers under a fresh name. Otherwise load()
+// would shadow it with the on-disk theme of the same name.
+fn set_theme_name(theme: &mut SteelTheme, name: String) {
+    theme.0.set_name(name)
 }
 
 fn string_to_color(string: SteelString) -> Result<Color, anyhow::Error> {

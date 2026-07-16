@@ -173,6 +173,7 @@
          register-theme
          theme-style
          theme-set-style!
+         theme-set-name!
          string->color
          get-theme-by-name
          current-theme
