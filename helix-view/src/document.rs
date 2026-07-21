@@ -204,6 +204,12 @@ pub struct Document {
     /// re-prompting on every poll/focus check while the buffer stays modified.
     pub auto_reload_seen_mtime: Option<SystemTime>,
 
+    /// Set when the backing file was deleted externally while the buffer is open.
+    /// Forces [`Self::is_modified`] so the in-memory content is treated as unsaved
+    /// work (`:w` recreates the file, `:q` warns). Cleared once the buffer is saved
+    /// or reloaded from a file that exists again.
+    deleted_from_disk: bool,
+
     last_saved_revision: usize,
     version: i32, // should be usize?
     pub(crate) modified_since_accessed: bool,
@@ -767,6 +773,7 @@ impl Document {
             savepoints: Vec::new(),
             last_saved_time: SystemTime::now(),
             auto_reload_seen_mtime: None,
+            deleted_from_disk: false,
             last_saved_revision: 0,
             modified_since_accessed: false,
             language_servers: HashMap::new(),
@@ -1856,7 +1863,20 @@ impl Document {
             self.last_saved_revision,
             current_revision
         );
-        current_revision != self.last_saved_revision || !self.changes.is_empty()
+        current_revision != self.last_saved_revision
+            || !self.changes.is_empty()
+            || self.deleted_from_disk
+    }
+
+    /// Whether the backing file was deleted externally while the buffer stays open.
+    pub fn is_deleted_from_disk(&self) -> bool {
+        self.deleted_from_disk
+    }
+
+    /// Mark (or unmark) the buffer as having lost its backing file on disk. While set,
+    /// [`Self::is_modified`] reports `true` so the content is treated as unsaved work.
+    pub fn set_deleted_from_disk(&mut self, deleted: bool) {
+        self.deleted_from_disk = deleted;
     }
 
     /// Save modifications to history, and so [`Self::is_modified`] will return false.
@@ -1865,6 +1885,9 @@ impl Document {
         let current_revision = history.current_revision();
         self.history.set(history);
         self.last_saved_revision = current_revision;
+        // A successful reload reads from a file that exists again, so the buffer is
+        // no longer orphaned.
+        self.deleted_from_disk = false;
     }
 
     /// Set the document's latest saved revision to the given one.
@@ -1877,6 +1900,8 @@ impl Document {
         );
         self.last_saved_revision = rev;
         self.last_saved_time = save_time;
+        // Saving (re)creates the file on disk, so the buffer is backed again.
+        self.deleted_from_disk = false;
     }
 
     /// Get the document's latest saved revision.
@@ -2602,6 +2627,40 @@ mod test {
                 range_length: None,
             }]
         );
+    }
+
+    #[test]
+    fn deleted_from_disk_marks_modified_without_touching_content() {
+        let text = Rope::from("alpha\nbravo\ncharlie\n");
+        let mut doc = Document::from(
+            text.clone(),
+            None,
+            Arc::new(ArcSwap::new(Arc::new(Config::default()))),
+            Arc::new(ArcSwap::from_pointee(syntax::Loader::default())),
+        );
+        // A freshly opened, unedited buffer is not modified.
+        assert!(!doc.is_modified());
+
+        // Losing the backing file must flag the buffer as modified (so :w recreates it
+        // and :q warns) while leaving the in-memory content completely intact.
+        doc.set_deleted_from_disk(true);
+        assert!(doc.is_deleted_from_disk());
+        assert!(doc.is_modified());
+        assert_eq!(doc.text(), &text);
+
+        // A successful reload (from a file that exists again) clears the flag.
+        doc.reset_modified();
+        assert!(!doc.is_deleted_from_disk());
+        assert!(!doc.is_modified());
+        assert_eq!(doc.text(), &text);
+
+        // Saving also clears it.
+        doc.set_deleted_from_disk(true);
+        assert!(doc.is_modified());
+        let rev = doc.get_current_revision();
+        doc.set_last_saved_revision(rev, SystemTime::now());
+        assert!(!doc.is_deleted_from_disk());
+        assert!(!doc.is_modified());
     }
 
     #[test]

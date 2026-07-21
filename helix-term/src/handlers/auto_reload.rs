@@ -38,9 +38,11 @@ impl ReloadHandler {
             return;
         }
         let fs_events = event.fs_events.clone();
+        // React to content changes (Modified) and to deletions (Delete) of open files.
+        // Create/Tempfile carry no action for already-open buffers.
         if !fs_events
             .iter()
-            .any(|event| event.ty == EventType::Modified)
+            .any(|event| matches!(event.ty, EventType::Modified | EventType::Delete))
         {
             return;
         }
@@ -49,7 +51,7 @@ impl ReloadHandler {
             let mut vcs_reload = false;
 
             for fs_event in &*fs_events {
-                if fs_event.ty != EventType::Modified {
+                if !matches!(fs_event.ty, EventType::Modified | EventType::Delete) {
                     continue;
                 }
                 vcs_reload |= editor.diff_providers.needs_reload(fs_event);
@@ -194,7 +196,14 @@ fn handle_document_change(
 
     let mtime = match path.metadata() {
         Ok(meta) => meta.modified().unwrap_or(SystemTime::now()),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return,
+        // The file is gone. Statting it here (rather than trusting the event type) is
+        // also the atomic-save guard: a write-to-temp+rename briefly deletes the target
+        // but has already recreated it by the time we look, so that path returns `Ok`
+        // above and reloads normally -- only a genuine deletion reaches here.
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            handle_document_deleted(editor, doc_id);
+            return;
+        }
         // On a transient error (permissions, flaky mount) skip this tick rather than
         // fabricate a fresh `now()` mtime, which would never match `last_saved_time`
         // and would re-trigger a false "changed externally" prompt on every poll.
@@ -247,6 +256,29 @@ fn handle_document_change(
             }
         }
     }
+}
+
+/// The backing file of an open document was deleted externally. Keep the buffer and
+/// its in-memory content, but flag it so it counts as modified: `:w` recreates the
+/// file, `:q` warns about unsaved changes, and `:reload` fails gracefully (the buffer
+/// is preserved). The view is never switched. Warns once -- the flag both drives the
+/// modified state and de-duplicates the notification across repeated poll/watch ticks.
+fn handle_document_deleted(editor: &mut Editor, doc_id: DocumentId) {
+    let doc = doc_mut!(editor, &doc_id);
+    if doc.is_deleted_from_disk() {
+        return;
+    }
+    doc.set_deleted_from_disk(true);
+    // Reset so that if the file is recreated later, `handle_document_change` sees a
+    // fresh mtime and offers a normal reload instead of being suppressed by the guard.
+    doc.auto_reload_seen_mtime = None;
+    let name = doc
+        .relative_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "[scratch]".into());
+    editor.set_warning(format!(
+        "{name} was deleted on disk; buffer kept (:w to save, :bc! to discard)"
+    ));
 }
 
 /// Reload VCS diffs for all documents

@@ -18,8 +18,9 @@ events! {
     }
 }
 
-/// Create an Events collection from an iterator of paths.
-/// All paths will have EventType::Modified.
+/// Create an Events collection from an iterator of paths, used by the polling
+/// fallback. A path that no longer exists is reported as [`EventType::Delete`];
+/// otherwise [`EventType::Modified`].
 pub fn events_from_paths(paths: impl IntoIterator<Item = PathBuf>) -> Events {
     use filesentry::CanonicalPathBuf;
     let events: Vec<Event> = paths
@@ -27,10 +28,15 @@ pub fn events_from_paths(paths: impl IntoIterator<Item = PathBuf>) -> Events {
         .map(|path| {
             // A deleted path can no longer be canonicalized; fall back to the raw path
             // so deletions still produce an event instead of being silently dropped.
+            let ty = if path.symlink_metadata().is_ok() {
+                EventType::Modified
+            } else {
+                EventType::Delete
+            };
             let canonical = path.canonicalize().unwrap_or(path);
             Event {
                 path: CanonicalPathBuf::assert_canonicalized(&canonical),
-                ty: EventType::Modified,
+                ty,
             }
         })
         .collect();
