@@ -135,6 +135,11 @@ impl Application {
         );
         Self::load_configured_theme(&mut editor, &config.load(), &mut terminal, theme_mode);
 
+        // Snapshot the startup file-arg paths before they're consumed below
+        // to open documents (see `Editor::startup_file_args`). Excludes
+        // `--tutor`, which isn't a path the user typed.
+        editor.startup_file_args = args.files.keys().cloned().collect();
+
         let keys = Box::new(Map::new(Arc::clone(&config), |config: &Config| {
             &config.keys
         }));
