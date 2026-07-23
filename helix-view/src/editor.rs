@@ -2345,11 +2345,17 @@ impl Editor {
         let prev_id = std::mem::replace(&mut self.tree.focus, view_id);
         doc_mut!(self).mark_as_focused();
 
-        let focus_lost = self.tree.get(prev_id).doc;
-        dispatch(DocumentFocusLost {
-            editor: self,
-            doc: focus_lost,
-        });
+        // `prev_id` can already be gone from the tree here - e.g. if it was
+        // an empty scratch view removed as a side effect of the work above
+        // (enter_normal_mode/ensure_cursor_in_view/the sync_changes loop).
+        // Nothing meaningful lost focus in that case, so just skip the
+        // dispatch rather than unwrap a stale ViewId.
+        if let Some(focus_lost) = self.tree.try_get(prev_id).map(|view| view.doc) {
+            dispatch(DocumentFocusLost {
+                editor: self,
+                doc: focus_lost,
+            });
+        }
     }
 
     pub fn focus_next(&mut self) {

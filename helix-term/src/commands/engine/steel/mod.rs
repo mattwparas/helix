@@ -5099,7 +5099,9 @@ fn get_init_scm_path() -> String {
 // TODO:
 fn current_path(cx: &mut Context) -> Option<String> {
     let current_focus = cx.editor.tree.focus;
-    let view = cx.editor.tree.get(current_focus);
+    // `tree.focus` can transiently point at an already-removed view during
+    // teardown (e.g. quit) - guard instead of unwrapping.
+    let view = cx.editor.tree.try_get(current_focus)?;
     let doc = &view.doc;
     // Lifetime of this needs to be tied to the existing document
     let current_doc = cx.editor.documents.get(doc);
@@ -5140,8 +5142,10 @@ fn cx_current_focus(cx: &mut Context) -> helix_view::ViewId {
     cx.editor.tree.focus
 }
 
-fn cx_get_document_id(cx: &mut Context, view_id: helix_view::ViewId) -> DocumentId {
-    cx.editor.tree.get(view_id).doc
+fn cx_get_document_id(cx: &mut Context, view_id: helix_view::ViewId) -> Option<DocumentId> {
+    // `view_id` may no longer exist in the tree - e.g. `tree.focus` can be left
+    // pointing at an already-removed view transiently during teardown (quit).
+    cx.editor.tree.try_get(view_id).map(|view| view.doc)
 }
 
 fn document_id_to_text(cx: &mut Context, doc_id: DocumentId) -> Option<SteelRopeSlice> {
