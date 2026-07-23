@@ -714,18 +714,21 @@ impl EditorView {
         let current_doc = view!(editor).doc;
 
         for doc in editor.documents() {
-            let fname = match doc.path() {
-                Some(path) => path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_str()
-                    .unwrap_or_default(),
-                // No real path - prefer a plugin-set short tab label (e.g.
-                // "oil" for a file-manager buffer) over the generic marker.
-                None => doc
-                    .bufferline_name
-                    .as_deref()
-                    .unwrap_or(SCRATCH_BUFFER_NAME),
+            // A plugin-set short tab label (e.g. "oil" for a file-manager
+            // buffer, or "ours"/"theirs" for a merge-conflict side pane)
+            // always wins when set, even over a real path - a plugin asking
+            // for a specific label is intentionally relabeling the tab, not
+            // just filling in a gap left by a pathless scratch buffer.
+            let fname = match doc.bufferline_name.as_deref() {
+                Some(name) => name,
+                None => match doc.path() {
+                    Some(path) => path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_str()
+                        .unwrap_or_default(),
+                    None => SCRATCH_BUFFER_NAME,
+                },
             };
 
             let style = if current_doc == doc.id() {
