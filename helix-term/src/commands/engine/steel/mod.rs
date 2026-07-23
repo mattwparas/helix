@@ -78,7 +78,10 @@ use crate::{
     commands::{insert, TYPABLE_COMMAND_LIST},
     compositor::{self, Component, Compositor},
     config::Config,
-    events::{OnModeSwitch, PostCommand, PostInsertChar, TerminalFocusGained, TerminalFocusLost},
+    events::{
+        DocumentWillSave, OnModeSwitch, PostCommand, PostInsertChar, TerminalFocusGained,
+        TerminalFocusLost,
+    },
     job::{self, Callback, Jobs},
     keymap::{self, merge_keys, KeyTrie, KeymapResult, MappableCommand},
     ui::{self, picker::PathOrId, PickerColumn, Popup, Prompt, PromptEvent},
@@ -683,6 +686,8 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         )
         .register_fn_with_ctx(CTX, "regex-selection", regex_selection)
         .register_fn_with_ctx(CTX, "replace-selection-with", replace_selection)
+        .register_fn_with_ctx(CTX, "buffer-set-text!", buffer_set_text)
+        .register_fn_with_ctx(CTX, "buffer-mark-saved!", buffer_mark_saved)
         .register_fn_with_ctx(
             CTX,
             "enqueue-expression-in-engine",
@@ -3438,6 +3443,7 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
         "document-focus-lost" => register_document_focus_lost(generation, rooted),
         "selection-did-change" => register_selection_did_change(generation, rooted),
         "document-opened" => register_document_opened(generation, rooted),
+        "document-will-save" => register_document_will_save(generation, rooted),
         "document-saved" => register_document_saved(generation, rooted),
         "document-changed" => register_document_changed(generation, rooted),
         "document-closed" => register_document_closed(generation, rooted),
@@ -3641,6 +3647,49 @@ fn register_post_command(generation: usize, rooted: RootedSteelVal) -> steel::Un
             rooted.value().clone(),
             &mut [event.command.name().into_steelval().unwrap()],
         );
+        Ok(())
+    });
+    Ok(SteelVal::Void).into()
+}
+
+/// Unlike the other hooks, this one is dispatched synchronously and its
+/// return value is observed: the callback returning `#true` cancels the
+/// save (the callback is expected to have handled it itself), matching
+/// `document-will-save`'s "was this handled" contract described in its doc
+/// comment. Every other hook here discards the callback's return value and
+/// runs through the (deferred) job queue instead, which can't work for a
+/// hook that needs to short-circuit a decision the caller is about to make.
+fn register_document_will_save(
+    generation: usize,
+    rooted: RootedSteelVal,
+) -> steel::UnRecoverableResult {
+    register_hook!(move |event: &mut DocumentWillSave<'_, '_>| {
+        if !is_current_generation(generation) {
+            return Ok(());
+        }
+
+        let doc_id = event.doc;
+        let path = event
+            .path
+            .map(|p| p.to_string_lossy().to_string())
+            .into_steelval()
+            .unwrap();
+
+        let result = enter_engine(|guard| {
+            call_with_context_and_args(
+                guard,
+                event.cx,
+                rooted.value().clone(),
+                &mut [doc_id.into_steelval().unwrap(), path],
+            )
+        });
+
+        match result {
+            Ok(SteelVal::BoolV(true)) => *event.cancel = true,
+            Ok(_) => {}
+            Err(e) => event.cx.editor.set_error(e.to_string()),
+        }
+
         Ok(())
     });
     Ok(SteelVal::Void).into()
@@ -4138,6 +4187,17 @@ pub fn load_ext_api(engine: &mut Engine, generate_sources: bool) {
     engine.register_steel_module("helix/ext.scm".to_string(), ext_api.to_string());
 }
 
+pub fn load_buffer_types_api(engine: &mut Engine, generate_sources: bool) {
+    let buffer_types_api = include_str!("buffer-types.scm");
+    if generate_sources {
+        generate_module("buffer-types.scm", buffer_types_api);
+    }
+    engine.register_steel_module(
+        "helix/buffer-types.scm".to_string(),
+        buffer_types_api.to_string(),
+    );
+}
+
 // Note: This implementation is aligned with what the steel language server
 // expects. This shouldn't stay here, but for alpha purposes its fine.
 pub fn steel_lsp_home_dir() -> PathBuf {
@@ -4173,6 +4233,7 @@ pub fn configure_builtin_sources(engine: &mut Engine, generate_sources: bool) {
     load_high_level_theme_api(engine, generate_sources);
     load_high_level_keymap_api(engine, generate_sources);
     load_ext_api(engine, generate_sources);
+    load_buffer_types_api(engine, generate_sources);
 
     if generate_sources {
         configure_lsp_globals();
@@ -5548,6 +5609,26 @@ fn replace_selection(cx: &mut Context, value: String) {
         });
 
     doc.apply(&transaction, view.id);
+}
+
+// Replace the entire contents of the current buffer with `text`, diffing against the
+// existing content so undo history and mapped state (selections, diagnostics, etc.)
+// stay coherent instead of being nuked by a delete-then-insert.
+fn buffer_set_text(cx: &mut Context, text: SteelString) {
+    let (view, doc) = current!(cx.editor);
+    let new_text = helix_core::Rope::from(text.as_str());
+    let transaction = helix_core::diff::compare_ropes(doc.text(), &new_text);
+    doc.apply(&transaction, view.id);
+}
+
+// Mark the current buffer as saved at its current revision, without writing
+// anything to disk. For a `document-will-save` hook that takes over a save
+// itself (see `helix/buffer-types.scm`), this is how it clears the modified
+// indicator afterward, same as a real write would have.
+fn buffer_mark_saved(cx: &mut Context) {
+    let (_, doc) = current!(cx.editor);
+    let rev = doc.get_current_revision();
+    doc.set_last_saved_revision(rev, std::time::SystemTime::now());
 }
 
 // TODO: Remove this!

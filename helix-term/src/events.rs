@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use helix_event::{events, register_event};
 use helix_view::document::Mode;
 use helix_view::events::{
@@ -5,6 +7,7 @@ use helix_view::events::{
     DocumentFocusLost, DocumentSaved, LanguageServerExited, LanguageServerInitialized,
     LspProgressUpdate, SelectionDidChange,
 };
+use helix_view::DocumentId;
 
 use crate::commands;
 use crate::keymap::MappableCommand;
@@ -15,6 +18,16 @@ events! {
     PostCommand<'a, 'cx> { command: & 'a MappableCommand, cx: &'a mut commands::Context<'cx> }
     TerminalFocusGained<'a, 'cx> { cx: &'a mut commands::Context<'cx> }
     TerminalFocusLost<'a, 'cx> { cx: &'a mut commands::Context<'cx> }
+    // Fired synchronously before a `:w`-family command writes a document to disk.
+    // A hook can set `*cancel = true` to take over the save entirely (e.g. a
+    // plugin-owned buffer that applies its own side effect instead of a literal
+    // file write) and skip the built-in write path for this invocation.
+    DocumentWillSave<'a, 'cx> {
+        doc: DocumentId,
+        path: Option<&'a Path>,
+        cancel: &'a mut bool,
+        cx: &'a mut commands::Context<'cx>
+    }
 }
 
 pub fn register() {
@@ -23,6 +36,7 @@ pub fn register() {
     register_event::<PostCommand>();
     register_event::<TerminalFocusGained>();
     register_event::<TerminalFocusLost>();
+    register_event::<DocumentWillSave>();
     register_event::<DocumentDidOpen>();
     register_event::<DocumentDidChange>();
     register_event::<DocumentDidClose>();

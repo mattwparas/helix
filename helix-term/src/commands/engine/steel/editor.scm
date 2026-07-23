@@ -23,6 +23,7 @@
 ;; * 'document-focus-lost
 ;; * 'selection-did-change
 ;; * 'document-opened
+;; * 'document-will-save
 ;; * 'document-saved
 ;; * 'document-changed
 ;; * 'document-closed
@@ -87,6 +88,28 @@
 ;; ## document-opened
 ;;
 ;; Expects a function with one argument to accept the doc id of the document that was just opened.
+;;
+;; ## document-will-save
+;;
+;; Fired synchronously, before a `:w`-family command writes the document to
+;; disk - unlike every other hook, which runs deferred and can't affect
+;; anything the caller does next. Expects a function of two arguments, the
+;; doc id and the resolved save path (or `#false` if none could be
+;; resolved). If the callback returns `#true`, the save is considered fully
+;; handled and the built-in write is skipped for this invocation; any other
+;; return value lets the write proceed normally. This is the primitive for a
+;; plugin-owned buffer (a directory listing, a diff view, ...) that wants
+;; `:w` to run its own logic instead of writing the buffer's literal text to
+;; `path` - the callback is responsible for whatever "saved" should mean for
+;; that buffer, including clearing its modified state if desired.
+;;
+;; ```scheme
+;; (register-hook 'document-will-save
+;;                 (lambda (doc-id path)
+;;                   (if (my-plugin-buffer? doc-id)
+;;                       (begin (my-plugin-apply! doc-id) #true)
+;;                       #false)))
+;; ```
 ;;
 ;; ## document-saved
 ;;

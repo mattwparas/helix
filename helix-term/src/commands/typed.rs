@@ -1,6 +1,8 @@
 use std::io::BufReader;
 use std::ops::{self, Deref};
+use std::path::PathBuf;
 
+use crate::events::DocumentWillSave;
 use crate::job::Job;
 
 use super::*;
@@ -383,6 +385,36 @@ fn write_impl(
     path: Option<&str>,
     options: WriteOptions,
 ) -> anyhow::Result<()> {
+    let doc_id = doc!(cx.editor).id();
+    let resolved_path = path
+        .map(PathBuf::from)
+        .or_else(|| doc!(cx.editor).path().map(|p| p.to_path_buf()));
+
+    let mut cancel = false;
+    // `DocumentWillSave` hooks run through the same dispatch machinery as
+    // command hooks (`PostCommand`, etc.), which expects `commands::Context`
+    // rather than the `compositor::Context` typed commands are given. Build a
+    // throwaway one over the same `editor`/`jobs` borrows; any compositor
+    // callback a hook queues (e.g. pushing a popup) is dropped, since there's
+    // nowhere to hand it off to here.
+    let mut command_cx = Context {
+        register: None,
+        count: None,
+        editor: cx.editor,
+        callback: Vec::new(),
+        on_next_key_callback: None,
+        jobs: cx.jobs,
+    };
+    helix_event::dispatch(DocumentWillSave {
+        doc: doc_id,
+        path: resolved_path.as_deref(),
+        cancel: &mut cancel,
+        cx: &mut command_cx,
+    });
+    if cancel {
+        return Ok(());
+    }
+
     let config = cx.editor.config();
     let (view, doc) = current!(cx.editor);
     let doc_id = doc.id();

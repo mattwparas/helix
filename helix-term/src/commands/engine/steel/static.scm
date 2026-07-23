@@ -43,6 +43,28 @@
 ;;Replace the existing selection with the given string
 (define replace-selection-with helix.static.replace-selection-with)
 
+(provide buffer-set-text!)
+;;@doc
+;;Replace the entire contents of the current buffer with `text`. The new content
+;;is diffed against the existing buffer so undo history stays a single coherent
+;;step and unrelated state (selections, diagnostics) is only remapped, not reset.
+;;
+;;```scheme
+;;(buffer-set-text! text) -> void?
+;;```
+(define buffer-set-text! helix.static.buffer-set-text!)
+
+(provide buffer-mark-saved!)
+;;@doc
+;;Mark the current buffer as saved at its current revision, without writing
+;;anything to disk. Used to clear the modified indicator after a
+;;`document-will-save` hook has taken over a save itself.
+;;
+;;```scheme
+;;(buffer-mark-saved!) -> void?
+;;```
+(define buffer-mark-saved! helix.static.buffer-mark-saved!)
+
 (provide enqueue-expression-in-engine)
 ;;@doc
 ;;Enqueue an expression to run at the top level context,

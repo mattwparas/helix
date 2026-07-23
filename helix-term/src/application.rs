@@ -142,6 +142,16 @@ impl Application {
 
         compositor.push(editor_view);
 
+        // The tree has no view yet at this point (`Tree::new` leaves `focus`
+        // pointing at the root container), so anything relying on "there is
+        // a current buffer" - `current!`/`current_ref!` and everything built
+        // on them - panics if touched before one exists. The init script
+        // below runs arbitrary plugin code that may well do exactly that
+        // (e.g. a hook or a buffer-creation helper called eagerly at load
+        // time), so give it a real place to land. It's cleaned up below,
+        // once the real initial buffer(s) are open, if nothing claimed it.
+        let placeholder_doc_id = editor.new_file(Action::VerticalSplit);
+
         let mut jobs = Jobs::new();
         {
             let syn_loader = editor.syn_loader.clone();
@@ -252,6 +262,19 @@ impl Application {
             editor
                 .new_file_from_stdin(Action::VerticalSplit)
                 .unwrap_or_else(|_| editor.new_file(Action::VerticalSplit));
+        }
+
+        // The real initial buffer(s) are open now, so the placeholder from
+        // before the init script is redundant - unless a hook or other
+        // eagerly-run plugin code actually used it, in which case leave it
+        // alone (same "empty scratch buffer" check `Action::Replace` already
+        // uses elsewhere: unmodified and never given a path).
+        if let Some(doc) = editor.document(placeholder_doc_id) {
+            if !doc.is_modified() && doc.path().is_none() {
+                // `force: false` re-asserts that safety check; it should
+                // never actually reject here given the check above.
+                let _ = editor.close_document(placeholder_doc_id, false);
+            }
         }
 
         #[cfg(windows)]
