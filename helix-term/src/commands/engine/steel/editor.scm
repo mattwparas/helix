@@ -291,6 +291,13 @@
 ;;Set the name of a scratch buffer.
 (define set-scratch-buffer-name! helix.set-scratch-buffer-name!)
 
+(provide set-bufferline-name!)
+;;@doc
+;;Set the short bufferline-tab label for a scratch buffer, independent of
+;;set-scratch-buffer-name! (which is shown in the statusline and can be
+;;long, e.g. a full directory path).
+(define set-bufferline-name! helix.set-bufferline-name!)
+
 (provide set-buffer-uri!)
 ;;@doc
 ;;Set the URI of the buffer

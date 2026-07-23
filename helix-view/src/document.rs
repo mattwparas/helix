@@ -216,6 +216,10 @@ pub struct Document {
 
     // A name separate from the file name
     pub name: Option<String>,
+    // A short label for the bufferline tab, separate from both the file name
+    // and `name` above (which can be long - e.g. a full directory path - and
+    // is meant for the statusline, not a narrow tab).
+    pub bufferline_name: Option<String>,
     pub readonly: bool,
 
     pub previous_diagnostic_ids: HashMap<LanguageServerId, String>,
@@ -786,6 +790,7 @@ impl Document {
             version_control_head: None,
             focused_at: std::time::Instant::now(),
             name: None,
+            bufferline_name: None,
             readonly: false,
             jump_labels: HashMap::new(),
             document_highlights: HashMap::new(),

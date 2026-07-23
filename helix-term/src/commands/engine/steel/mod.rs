@@ -1496,6 +1496,7 @@ fn load_editor_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "editor-set-mode!", cx_set_mode)
         .register_fn_with_ctx(CTX, "editor-doc-in-view?", cx_is_document_in_view)
         .register_fn_with_ctx(CTX, "set-scratch-buffer-name!", set_scratch_buffer_name)
+        .register_fn_with_ctx(CTX, "set-bufferline-name!", set_bufferline_name)
         // Get the last saved time of the document
         .register_fn_with_ctx(
             CTX,
@@ -5117,6 +5118,21 @@ fn set_scratch_buffer_name(cx: &mut Context, name: String) {
 
     if let Some(current_doc) = current_doc {
         current_doc.name = Some(name);
+    }
+}
+
+// A short label for the bufferline tab specifically - `name` (set via
+// set-scratch-buffer-name!) is shown in the statusline and can reasonably be
+// long (e.g. a full directory path), but the bufferline only has room for a
+// short tab title.
+fn set_bufferline_name(cx: &mut Context, name: String) {
+    let current_focus = cx.editor.tree.focus;
+    let Some(doc) = cx.editor.tree.try_get(current_focus).map(|view| view.doc) else {
+        return;
+    };
+
+    if let Some(current_doc) = cx.editor.documents.get_mut(&doc) {
+        current_doc.bufferline_name = Some(name);
     }
 }
 

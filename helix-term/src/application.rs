@@ -185,6 +185,7 @@ impl Application {
             // handle it (e.g. a file-manager buffer bound to a global "oil"
             // command) - falling back to the native picker if none is
             // defined.
+            let mut directory_handled_by_plugin = false;
             if let Some((first, _)) = files_it.next_if(|(p, _)| p.is_dir()) {
                 let dir_arg = first.to_string_lossy().into_owned();
                 let handled = {
@@ -203,7 +204,9 @@ impl Application {
                     )
                 };
 
-                if !handled {
+                if handled {
+                    directory_handled_by_plugin = true;
+                } else {
                     let picker = ui::file_picker(&editor, first);
                     compositor.push(Box::new(overlaid(picker)));
                 }
@@ -275,7 +278,10 @@ impl Application {
                     let (view, doc) = current!(editor);
                     align_view(doc, view, Align::Center);
                 }
-            } else {
+            } else if !directory_handled_by_plugin {
+                // Only the native-picker path needs a backing scratch buffer
+                // to float over - a plugin that opened a real buffer for the
+                // directory (e.g. oil) doesn't need a second one alongside it.
                 editor.new_file(Action::VerticalSplit);
             }
         } else if stdin().is_terminal() || cfg!(feature = "integration") {
