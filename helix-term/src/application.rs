@@ -181,10 +181,32 @@ impl Application {
         } else if !args.files.is_empty() {
             let mut files_it = args.files.into_iter().peekable();
 
-            // If the first file is a directory, skip it and open a picker
+            // If the first file is a directory, skip it and let a plugin
+            // handle it (e.g. a file-manager buffer bound to a global "oil"
+            // command) - falling back to the native picker if none is
+            // defined.
             if let Some((first, _)) = files_it.next_if(|(p, _)| p.is_dir()) {
-                let picker = ui::file_picker(&editor, first);
-                compositor.push(Box::new(overlaid(picker)));
+                let dir_arg = first.to_string_lossy().into_owned();
+                let handled = {
+                    let mut cx = crate::commands::Context {
+                        register: None,
+                        count: std::num::NonZeroUsize::new(1),
+                        editor: &mut editor,
+                        callback: Vec::new(),
+                        on_next_key_callback: None,
+                        jobs: &mut jobs,
+                    };
+                    crate::commands::ScriptingEngine::call_function_by_name(
+                        &mut cx,
+                        "oil",
+                        vec![std::borrow::Cow::Owned(dir_arg)],
+                    )
+                };
+
+                if !handled {
+                    let picker = ui::file_picker(&editor, first);
+                    compositor.push(Box::new(overlaid(picker)));
+                }
             }
 
             // If there are any more files specified, open them
