@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use helix_event::{events, register_event};
+use helix_event::{events, register_event, register_hook};
 use helix_view::document::Mode;
 use helix_view::events::{
     ConfigDidChange, DiagnosticsDidChange, DocumentDidChange, DocumentDidClose, DocumentDidOpen,
@@ -11,6 +11,7 @@ use helix_view::DocumentId;
 
 use crate::commands;
 use crate::keymap::MappableCommand;
+use crate::term_pty;
 
 events! {
     OnModeSwitch<'a, 'cx> { old_mode: Mode, new_mode: Mode, cx: &'a mut commands::Context<'cx> }
@@ -48,4 +49,9 @@ pub fn register() {
     register_event::<LanguageServerExited>();
     register_event::<LspProgressUpdate>();
     register_event::<ConfigDidChange>();
+
+    register_hook!(move |event: &mut DocumentDidClose<'_>| {
+        term_pty::cleanup(event.doc.id());
+        Ok(())
+    });
 }

@@ -65,6 +65,74 @@
 ;;```
 (define buffer-mark-saved! helix.static.buffer-mark-saved!)
 
+(provide term-buffer-spawn!)
+;;@doc
+;;Spawn `command` (run as `$SHELL -c command`, so `cd dir && exec prog`
+;;style chaining works) as a new terminal buffer, replacing the current
+;;view's document. The buffer's rope is kept live-synced to the child
+;;process's PTY output — it's a real `Document`, so bufferline, splits, and
+;;buffer-next/previous all work on it for free. Returns the new buffer's
+;;doc-id.
+;;
+;;`$SHELL` isn't always bash/POSIX-sh — if `command` uses syntax that
+;;isn't portable across shells (e.g. `(...)` subshell grouping, which
+;;fish doesn't understand the same way), use `term-buffer-spawn-with-shell!`
+;;to pin an explicit interpreter instead of gambling on the user's login
+;;shell.
+;;
+;;The buffer closes itself automatically when the child process exits (see
+;;the `document-closed` hook); use `term-buffer-alive?` to check whether
+;;that has already happened.
+;;
+;;```scheme
+;;(term-buffer-spawn! command) -> doc-id?
+;;
+;;command : string?
+;;```
+(define term-buffer-spawn! helix.static.term-buffer-spawn!)
+
+(provide term-buffer-spawn-with-shell!)
+;;@doc
+;;Same as `term-buffer-spawn!`, but running `command` under an explicitly
+;;chosen shell instead of `$SHELL`.
+;;
+;;```scheme
+;;(term-buffer-spawn-with-shell! command shell) -> doc-id?
+;;
+;;command : string?
+;;shell : string?
+;;```
+(define term-buffer-spawn-with-shell! helix.static.term-buffer-spawn-with-shell!)
+
+(provide term-buffer-send!)
+;;@doc
+;;Write raw text to a terminal buffer's child process stdin. No implicit
+;;newline is appended — include `\r` yourself if you want one, same as a
+;;real keypress would send. No-op if `doc-id` isn't a running terminal
+;;buffer (e.g. the process already exited).
+;;
+;;```scheme
+;;(term-buffer-send! doc-id text) -> void?
+;;
+;;doc-id : doc-id?
+;;text : string?
+;;```
+(define term-buffer-send! helix.static.term-buffer-send!)
+
+(provide term-buffer-alive?)
+;;@doc
+;;Whether `doc-id` is a still-running terminal buffer created with
+;;`term-buffer-spawn!`. Becomes `#false` the moment the child process
+;;exits, not just when the buffer is closed some other way — a terminal
+;;buffer always closes itself as soon as this would go false.
+;;
+;;```scheme
+;;(term-buffer-alive? doc-id) -> bool?
+;;
+;;doc-id : doc-id?
+;;```
+(define term-buffer-alive? helix.static.term-buffer-alive?)
+
 (provide enqueue-expression-in-engine)
 ;;@doc
 ;;Enqueue an expression to run at the top level context,

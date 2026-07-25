@@ -688,6 +688,14 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "replace-selection-with", replace_selection)
         .register_fn_with_ctx(CTX, "buffer-set-text!", buffer_set_text)
         .register_fn_with_ctx(CTX, "buffer-mark-saved!", buffer_mark_saved)
+        .register_fn_with_ctx(CTX, "term-buffer-spawn!", term_buffer_spawn)
+        .register_fn_with_ctx(
+            CTX,
+            "term-buffer-spawn-with-shell!",
+            term_buffer_spawn_with_shell,
+        )
+        .register_fn("term-buffer-send!", term_buffer_send)
+        .register_fn("term-buffer-alive?", term_buffer_alive)
         .register_fn_with_ctx(
             CTX,
             "enqueue-expression-in-engine",
@@ -3619,10 +3627,7 @@ fn register_document_focus_lost(
     Ok(SteelVal::Void).into()
 }
 
-fn register_lsp_progress(
-    generation: usize,
-    rooted: RootedSteelVal,
-) -> steel::UnRecoverableResult {
+fn register_lsp_progress(generation: usize, rooted: RootedSteelVal) -> steel::UnRecoverableResult {
     register_hook!(move |event: &mut LspProgressUpdate| {
         let cloned_func = rooted.value().clone();
         let args = [
@@ -4150,7 +4155,11 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "selection-char-ranges", selection_char_ranges)
         .register_fn_with_ctx(CTX, "set-document-highlights!", set_script_highlights)
         .register_fn_with_ctx(CTX, "clear-document-highlights!", clear_script_highlights)
-        .register_fn_with_ctx(CTX, "clear-all-document-highlights!", clear_all_script_highlights);
+        .register_fn_with_ctx(
+            CTX,
+            "clear-all-document-highlights!",
+            clear_all_script_highlights,
+        );
 
     if generate_sources {
         generate_module("misc.scm", &builtin_misc_module);
@@ -4696,47 +4705,60 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
                 })
                 .collect();
 
-            let columns = [PickerColumn::new("location", |row: &LocationRow, _: &()| {
-                row.label.as_str().into()
-            })];
+            let columns = [PickerColumn::new(
+                "location",
+                |row: &LocationRow, _: &()| row.label.as_str().into(),
+            )];
 
             let rooted = callback_fn.as_rooted();
-            let picker = ui::Picker::new(columns, 0, rows, (), move |cx, row: &LocationRow, action| {
-                if let Err(e) = cx.editor.open(&row.path, action) {
-                    cx.editor
-                        .set_error(format!("Failed to open '{}': {}", row.path.display(), e));
-                    return;
-                }
-                {
-                    let (view, doc) = current!(cx.editor);
-                    let text = doc.text();
-                    if row.line_start < text.len_lines() {
-                        let start = text.line_to_char(row.line_start);
-                        doc.set_selection(view.id, Selection::point(start));
-                        if action.align_view(view, doc.id()) {
-                            helix_view::align_view(doc, view, helix_view::Align::Center);
+            let picker = ui::Picker::new(
+                columns,
+                0,
+                rows,
+                (),
+                move |cx, row: &LocationRow, action| {
+                    if let Err(e) = cx.editor.open(&row.path, action) {
+                        cx.editor.set_error(format!(
+                            "Failed to open '{}': {}",
+                            row.path.display(),
+                            e
+                        ));
+                        return;
+                    }
+                    {
+                        let (view, doc) = current!(cx.editor);
+                        let text = doc.text();
+                        if row.line_start < text.len_lines() {
+                            let start = text.line_to_char(row.line_start);
+                            doc.set_selection(view.id, Selection::point(start));
+                            if action.align_view(view, doc.id()) {
+                                helix_view::align_view(doc, view, helix_view::Align::Center);
+                            }
                         }
                     }
-                }
-                // Run the Steel callback (no args) after the jump.
-                with_ephemeral_context(cx, |ctx| {
-                    let cloned_func = rooted.value();
-                    enter_engine(|guard| {
-                        if let Err(e) = guard
-                            .with_mut_reference::<Context, Context>(ctx)
-                            .consume_once(move |engine, args| {
-                                let context = args.into_iter().next().unwrap();
-                                engine.update_value(CTX, context);
-                                engine.call_function_with_args(cloned_func.clone(), Vec::new())
-                            })
-                        {
-                            present_error_inside_engine_context(ctx, guard, e);
-                        }
+                    // Run the Steel callback (no args) after the jump.
+                    with_ephemeral_context(cx, |ctx| {
+                        let cloned_func = rooted.value();
+                        enter_engine(|guard| {
+                            if let Err(e) = guard
+                                .with_mut_reference::<Context, Context>(ctx)
+                                .consume_once(move |engine, args| {
+                                    let context = args.into_iter().next().unwrap();
+                                    engine.update_value(CTX, context);
+                                    engine.call_function_with_args(cloned_func.clone(), Vec::new())
+                                })
+                            {
+                                present_error_inside_engine_context(ctx, guard, e);
+                            }
+                        });
                     });
-                });
-            })
+                },
+            )
             .with_preview(|_editor, row: &LocationRow| {
-                Some((PathOrId::Path(row.path.as_path()), Some((row.line_start, row.line_end))))
+                Some((
+                    PathOrId::Path(row.path.as_path()),
+                    Some((row.line_start, row.line_end)),
+                ))
             });
 
             WrappedDynComponent {
@@ -5651,6 +5673,70 @@ fn buffer_mark_saved(cx: &mut Context) {
     doc.set_last_saved_revision(rev, std::time::SystemTime::now());
 }
 
+// Spawn `command` (run as `shell -c command`) as a new terminal buffer
+// replacing the current view's document — same machinery as the native
+// `:term-buffer` command, but for an arbitrary program instead of an
+// interactive shell. Lets plugins (lazygit.hx, sidekick.hx, ...) embed a
+// specific program as a real buffer, with bufferline/split/buffer-nav for
+// free, instead of the old floating-component terminal.
+fn term_buffer_spawn_impl(
+    cx: &mut Context,
+    command: &str,
+    shell: Option<&str>,
+) -> anyhow::Result<DocumentId> {
+    cx.editor.new_file(Action::Replace);
+
+    let (view, doc) = current!(cx.editor);
+    let doc_id = doc.id();
+    let view_id = view.id;
+    let area = view.inner_area(doc);
+    // See the matching comment in `terminal_new` (commands/typed.rs): one
+    // column of slack so a full-width pty line doesn't sit exactly on
+    // Helix's soft-wrap boundary.
+    let (rows, cols) = (area.height.max(1), area.width.saturating_sub(1).max(1));
+
+    crate::term_pty::PtySession::spawn(doc_id, view_id, rows, cols, Some(command), shell)?;
+
+    cx.editor.mode = Mode::Insert;
+
+    Ok(doc_id)
+}
+
+fn term_buffer_spawn(cx: &mut Context, command: SteelString) -> anyhow::Result<DocumentId> {
+    term_buffer_spawn_impl(cx, command.as_str(), None)
+}
+
+// Same as `term_buffer_spawn`, but running `command` under an explicitly
+// chosen shell instead of `$SHELL`. For commands using syntax that isn't
+// portable across shells (e.g. POSIX `(...)` subshell grouping, which fish
+// doesn't understand the same way bash does) — pin `bash` rather than
+// gamble on what the user's login shell happens to be.
+fn term_buffer_spawn_with_shell(
+    cx: &mut Context,
+    command: SteelString,
+    shell: SteelString,
+) -> anyhow::Result<DocumentId> {
+    term_buffer_spawn_impl(cx, command.as_str(), Some(shell.as_str()))
+}
+
+// Write raw bytes to a terminal buffer's child process stdin. No implicit
+// newline appended — same convention the old `pty-process-send-command` had;
+// callers append `\r` themselves.
+fn term_buffer_send(doc_id: DocumentId, text: SteelString) {
+    if let Some(session) = crate::term_pty::get(doc_id) {
+        session.write_input(text.as_bytes());
+    }
+}
+
+// Whether `doc-id` is a still-running terminal buffer. A terminal buffer
+// closes itself (and this becomes false) the moment its child process
+// exits — see `term_pty::cleanup`, wired to the `document-closed` hook —
+// so this doubles as "is the process still alive", not just "does this
+// document still exist".
+fn term_buffer_alive(doc_id: DocumentId) -> bool {
+    crate::term_pty::is_terminal(doc_id)
+}
+
 // TODO: Remove this!
 fn move_window_to_the_left(cx: &mut Context) {
     while cx
@@ -5914,14 +6000,17 @@ pub fn add_typed_inlay_hint(
         let last_line = first_visible_line
             .saturating_add(view_height.saturating_mul(2))
             .min(len_lines);
-        DocumentInlayHints::empty_with_id(DocumentInlayHintsId { first_line, last_line })
+        DocumentInlayHints::empty_with_id(DocumentInlayHintsId {
+            first_line,
+            last_line,
+        })
     });
 
     let annotation = InlineAnnotation::new(char_index, completion.to_string());
     match kind.as_str() {
-        "type"      => new_inlay_hints.type_inlay_hints.push(annotation),
+        "type" => new_inlay_hints.type_inlay_hints.push(annotation),
         "parameter" => new_inlay_hints.parameter_inlay_hints.push(annotation),
-        _           => new_inlay_hints.other_inlay_hints.push(annotation),
+        _ => new_inlay_hints.other_inlay_hints.push(annotation),
     }
 
     let id = new_inlay_hints.id;
@@ -5956,7 +6045,10 @@ pub fn add_scoped_inlay_hint(
         let last_line = first_visible_line
             .saturating_add(view_height.saturating_mul(2))
             .min(len_lines);
-        DocumentInlayHints::empty_with_id(DocumentInlayHintsId { first_line, last_line })
+        DocumentInlayHints::empty_with_id(DocumentInlayHintsId {
+            first_line,
+            last_line,
+        })
     });
 
     let annotation = InlineAnnotation::new(char_index, completion.to_string());

@@ -645,6 +645,35 @@ fn new_file(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> an
     Ok(())
 }
 
+fn terminal_new(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    cx.editor.new_file(Action::Replace);
+
+    let (view, doc) = current!(cx.editor);
+    let doc_id = doc.id();
+    let view_id = view.id;
+    let area = view.inner_area(doc);
+    // Reserve one column: a pty line that exactly fills `cols` (common for
+    // box-drawn full-width TUI panels) sits right on Helix's own soft-wrap
+    // boundary and gets wrapped a second time on top of vt100's grid.
+    let (rows, cols) = (area.height.max(1), area.width.saturating_sub(1).max(1));
+
+    doc.bufferline_name = Some("term".to_string());
+
+    crate::term_pty::PtySession::spawn(doc_id, view_id, rows, cols, None, None)?;
+
+    cx.editor.mode = Mode::Insert;
+
+    Ok(())
+}
+
 fn format(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
     if event != PromptEvent::Validate {
         return Ok(());
@@ -3230,6 +3259,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &["n"],
         doc: "Create a new scratch buffer.",
         fun: new_file,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "term-buffer",
+        aliases: &["termbuf"],
+        doc: "Open a terminal buffer running your shell in the current split.",
+        fun: terminal_new,
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(0)),
