@@ -2089,7 +2089,13 @@ impl Editor {
     }
 
     /// Generate an id for a new document and register it.
-    fn new_document(&mut self, mut doc: Document) -> DocumentId {
+    /// Registers `doc` and returns its new id, without switching any view to
+    /// show it. Used by terminal-buffer-mode to spawn a pty attached to a
+    /// document that isn't visible yet, so a slow-to-start child process
+    /// (shell fork/exec + its own startup) doesn't flash an empty buffer
+    /// before there's real output to reveal — see `helix-term`'s
+    /// `term_pty::PtySession`.
+    pub fn new_document(&mut self, mut doc: Document) -> DocumentId {
         let id = self.next_document_id;
         // Safety: adding 1 from 1 is fine, practically impossible to reach usize max
         self.next_document_id =

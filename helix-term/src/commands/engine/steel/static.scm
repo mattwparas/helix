@@ -68,11 +68,19 @@
 (provide term-buffer-spawn!)
 ;;@doc
 ;;Spawn `command` (run as `$SHELL -c command`, so `cd dir && exec prog`
-;;style chaining works) as a new terminal buffer, replacing the current
-;;view's document. The buffer's rope is kept live-synced to the child
-;;process's PTY output — it's a real `Document`, so bufferline, splits, and
-;;buffer-next/previous all work on it for free. Returns the new buffer's
-;;doc-id.
+;;style chaining works) as a new terminal buffer. The buffer's rope is kept
+;;live-synced to the child process's PTY output — it's a real `Document`,
+;;so bufferline, splits, and buffer-next/previous all work on it for free.
+;;Returns the new buffer's doc-id.
+;;
+;;The buffer isn't switched to immediately: it's revealed (replacing the
+;;current view's document, same as `term-buffer-spawn!` used to do right
+;;away) the moment the child process produces its first real output,
+;;rather than flashing an empty buffer during its own startup latency
+;;(shell fork/exec, then its own init). Because of this, the returned
+;;doc-id is *not* the current buffer yet — use `document-set-bufferline-name!`
+;;with it directly rather than `set-bufferline-name!`, which only affects
+;;whatever buffer is current right now.
 ;;
 ;;`$SHELL` isn't always bash/POSIX-sh — if `command` uses syntax that
 ;;isn't portable across shells (e.g. `(...)` subshell grouping, which
@@ -132,6 +140,20 @@
 ;;doc-id : doc-id?
 ;;```
 (define term-buffer-alive? helix.static.term-buffer-alive?)
+
+(provide term-buffer-hide-gutter!)
+;;@doc
+;;Whether terminal buffers hide the line-number gutter. Defaults to `#true`
+;;— a full-width blank/loading terminal reads as "a terminal", whereas one
+;;with Helix's usual gutter furniture reads as "an empty file". Affects
+;;every terminal buffer, not a specific one.
+;;
+;;```scheme
+;;(term-buffer-hide-gutter! hide) -> void?
+;;
+;;hide : bool?
+;;```
+(define term-buffer-hide-gutter! helix.static.term-buffer-hide-gutter!)
 
 (provide enqueue-expression-in-engine)
 ;;@doc

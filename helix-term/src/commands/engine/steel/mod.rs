@@ -694,6 +694,7 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
             "term-buffer-spawn-with-shell!",
             term_buffer_spawn_with_shell,
         )
+        .register_fn("term-buffer-hide-gutter!", crate::term_pty::set_hide_gutter)
         .register_fn("term-buffer-send!", term_buffer_send)
         .register_fn("term-buffer-alive?", term_buffer_alive)
         .register_fn_with_ctx(
@@ -1505,6 +1506,11 @@ fn load_editor_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "editor-doc-in-view?", cx_is_document_in_view)
         .register_fn_with_ctx(CTX, "set-scratch-buffer-name!", set_scratch_buffer_name)
         .register_fn_with_ctx(CTX, "set-bufferline-name!", set_bufferline_name)
+        .register_fn_with_ctx(
+            CTX,
+            "document-set-bufferline-name!",
+            document_set_bufferline_name,
+        )
         // Get the last saved time of the document
         .register_fn_with_ctx(
             CTX,
@@ -5158,6 +5164,15 @@ fn set_bufferline_name(cx: &mut Context, name: String) {
     }
 }
 
+// Same as `set_bufferline_name`, but by doc-id rather than "current buffer"
+// — needed for a terminal buffer between `term-buffer-spawn!` returning and
+// its first reveal, since it isn't the current buffer yet at that point.
+fn document_set_bufferline_name(cx: &mut Context, doc_id: DocumentId, name: String) {
+    if let Some(doc) = cx.editor.documents.get_mut(&doc_id) {
+        doc.bufferline_name = Some(name);
+    }
+}
+
 fn set_buffer_uri(cx: &mut Context, uri: SteelString) -> anyhow::Result<()> {
     let current_focus = cx.editor.tree.focus;
     let view = cx.editor.tree.get(current_focus);
@@ -5684,10 +5699,7 @@ fn term_buffer_spawn_impl(
     command: &str,
     shell: Option<&str>,
 ) -> anyhow::Result<DocumentId> {
-    cx.editor.new_file(Action::Replace);
-
     let (view, doc) = current!(cx.editor);
-    let doc_id = doc.id();
     let view_id = view.id;
     let area = view.inner_area(doc);
     // See the matching comment in `terminal_new` (commands/typed.rs): one
@@ -5695,9 +5707,17 @@ fn term_buffer_spawn_impl(
     // Helix's soft-wrap boundary.
     let (rows, cols) = (area.height.max(1), area.width.saturating_sub(1).max(1));
 
-    crate::term_pty::PtySession::spawn(doc_id, view_id, rows, cols, Some(command), shell)?;
+    // Created but not switched to yet: term_pty::PtySession reveals it once
+    // the child process has actually produced something to show, instead of
+    // flashing an empty buffer during its own shell-fork/exec/init latency.
+    // Callers name the buffer via `document-set-bufferline-name!` with the
+    // returned doc-id, since `set-bufferline-name!`'s "current buffer"
+    // convention no longer points at it yet.
+    let new_doc =
+        helix_view::Document::default(cx.editor.config.clone(), cx.editor.syn_loader.clone());
+    let doc_id = cx.editor.new_document(new_doc);
 
-    cx.editor.mode = Mode::Insert;
+    crate::term_pty::PtySession::spawn(doc_id, view_id, rows, cols, Some(command), shell)?;
 
     Ok(doc_id)
 }

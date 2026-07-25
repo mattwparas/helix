@@ -298,6 +298,21 @@
 ;;long, e.g. a full directory path).
 (define set-bufferline-name! helix.set-bufferline-name!)
 
+(provide document-set-bufferline-name!)
+;;@doc
+;;Same as `set-bufferline-name!`, but by doc-id rather than the current
+;;buffer — needed right after `term-buffer-spawn!`/`term-buffer-spawn-with-shell!`
+;;(see their docs in `helix/static.scm`), since the buffer they return
+;;isn't current yet.
+;;
+;;```scheme
+;;(document-set-bufferline-name! doc-id name) -> void?
+;;
+;;doc-id : doc-id?
+;;name : string?
+;;```
+(define document-set-bufferline-name! helix.document-set-bufferline-name!)
+
 (provide set-buffer-uri!)
 ;;@doc
 ;;Set the URI of the buffer

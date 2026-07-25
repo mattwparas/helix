@@ -21,6 +21,7 @@ use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
 use helix_view::document::Mode;
+use helix_view::editor::Action;
 use helix_view::input::{KeyCode, KeyEvent, KeyModifiers};
 use helix_view::{DocumentId, ViewId};
 
@@ -51,6 +52,25 @@ pub struct PtySession {
     /// Last plain character written (outside of any escape sequence), for
     /// expanding ECMA-48 REP (see `preprocess`).
     last_char: Mutex<Option<char>>,
+    /// Whether the buffer has been switched to/shown yet. `doc_id` is
+    /// created but deliberately not displayed anywhere at spawn time —
+    /// `refresh_document` reveals it the first time there's real content to
+    /// show, so the child process's own startup latency (shell fork/exec,
+    /// its own init) never flashes an empty buffer first.
+    revealed: AtomicBool,
+}
+
+/// Whether terminal buffers hide the line-number gutter (default: yes — a
+/// full-width blank/loading terminal reads as "a terminal", whereas one
+/// with Helix's usual gutter furniture reads as "an empty file").
+static HIDE_GUTTER: AtomicBool = AtomicBool::new(true);
+
+pub fn hide_gutter() -> bool {
+    HIDE_GUTTER.load(Ordering::Relaxed)
+}
+
+pub fn set_hide_gutter(hide: bool) {
+    HIDE_GUTTER.store(hide, Ordering::Relaxed);
 }
 
 /// Minimal `vte::Perform` that only cares about the handful of CSI queries
@@ -193,6 +213,7 @@ impl PtySession {
             query_detector: Mutex::new((vte::Parser::new(), QueryResponder::default())),
             dirty: AtomicBool::new(false),
             last_char: Mutex::new(None),
+            revealed: AtomicBool::new(false),
         });
 
         TERMINALS.lock().insert(doc_id, session.clone());
@@ -355,9 +376,33 @@ impl PtySession {
 
     fn refresh_document(&self) {
         let doc_id = self.doc_id;
-        let view_id = self.view_id;
+        let spawn_view_id = self.view_id;
         let parser = self.parser.clone();
+        // Computed on whichever thread calls refresh_document (read_loop or
+        // the ticker) — the atomic swap means only the first caller, ever,
+        // sees `true`, so exactly one queued callback ends up doing the
+        // reveal, however many refreshes happen to race into the queue
+        // around the same time.
+        let just_revealed = !self.revealed.swap(true, Ordering::AcqRel);
         job::dispatch_blocking(move |editor, _compositor| {
+            if !editor.documents.contains_key(&doc_id) {
+                return;
+            }
+            let view_id = if just_revealed {
+                // First real content: switch to the buffer now instead of
+                // at spawn time, so the child process's own startup latency
+                // (shell fork/exec, its own init) never flashes an empty
+                // buffer before there's something to show.
+                editor.switch(doc_id, Action::Replace);
+                editor.mode = Mode::Insert;
+                // `switch` reveals into whichever view is *currently*
+                // focused, which may not be `spawn_view_id` if the user
+                // moved on before the child's first output arrived — use
+                // the view it actually landed in for the cursor sync below.
+                editor.tree.focus
+            } else {
+                spawn_view_id
+            };
             let Some(doc) = editor.document_mut(doc_id) else {
                 return;
             };

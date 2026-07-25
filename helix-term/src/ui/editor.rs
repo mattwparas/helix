@@ -95,7 +95,16 @@ impl EditorView {
         {
             let editor = &cx.editor;
 
-            let inner = view.inner_area(doc);
+            // A full-width blank/loading terminal reads as "a terminal";
+            // Helix's usual line-number gutter on top of it reads as "an
+            // empty file" — skip reserving that column at all for terminal
+            // buffers (configurable via term-buffer-hide-gutter!).
+            let hide_gutter = term_pty::is_terminal(doc_id) && term_pty::hide_gutter();
+            let inner = if hide_gutter {
+                view.area.clip_bottom(1) // still leave room for the statusline
+            } else {
+                view.inner_area(doc)
+            };
             // Only the focused view drives the pty's size: a terminal buffer
             // split into two views can't have two sizes, and resizing from
             // whichever view happened to render last would fight itself.
@@ -200,7 +209,7 @@ impl EditorView {
             }
 
             let gutter_overflow = view.gutter_offset(doc) == 0;
-            if !gutter_overflow {
+            if !gutter_overflow && !hide_gutter {
                 Self::render_gutter(
                     editor,
                     doc,
