@@ -208,11 +208,22 @@ where
         }
     }
 
+    let mode = context.editor.mode();
+    // A terminal buffer's "Insert" mode is really passthrough to the child
+    // process, not text editing — Neovim distinguishes this with its own
+    // "Terminal" mode label, so mirror that here rather than showing the
+    // same INS a real text buffer would.
+    let is_terminal_insert = mode == Mode::Insert && crate::term_pty::is_terminal(context.doc_id);
+
     let modenames = &config.statusline.mode;
-    let mode_str = match context.editor.mode() {
-        Mode::Insert => &modenames.insert,
-        Mode::Select => &modenames.select,
-        Mode::Normal => &modenames.normal,
+    let mode_str = if is_terminal_insert {
+        "TERM"
+    } else {
+        match mode {
+            Mode::Insert => &modenames.insert,
+            Mode::Select => &modenames.select,
+            Mode::Normal => &modenames.normal,
+        }
     };
     let content = if visible {
         format!(" {mode_str} ")
@@ -221,7 +232,7 @@ where
         " ".repeat(mode_str.width() + 2)
     };
     let style = if visible && config.color_modes {
-        match context.editor.mode() {
+        match mode {
             Mode::Insert => context.editor.theme.get("ui.statusline.insert"),
             Mode::Select => context.editor.theme.get("ui.statusline.select"),
             Mode::Normal => context.editor.theme.get("ui.statusline.normal"),
