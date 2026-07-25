@@ -20,6 +20,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
+use helix_view::document::Mode;
 use helix_view::input::{KeyCode, KeyEvent, KeyModifiers};
 use helix_view::{DocumentId, ViewId};
 
@@ -336,8 +337,19 @@ impl PtySession {
         // buffer showing a dead shell isn't useful to leave open.
         let _ = self.child.lock().wait();
         let doc_id = self.doc_id;
+        let view_id = self.view_id;
         job::dispatch_blocking(move |editor, _compositor| {
+            // Only if the terminal's own view still has focus and is still
+            // showing it — otherwise the user has since moved on to editing
+            // something else, and forcing Normal mode there would yank them
+            // out of unrelated typing just because a background process
+            // happened to exit at that moment.
+            let was_focused = editor.tree.focus == view_id
+                && editor.tree.try_get(view_id).map(|v| v.doc) == Some(doc_id);
             let _ = editor.close_document(doc_id, true);
+            if was_focused {
+                editor.mode = Mode::Normal;
+            }
         });
     }
 
