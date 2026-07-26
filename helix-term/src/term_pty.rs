@@ -23,7 +23,6 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use helix_view::document::Mode;
 use helix_view::editor::Action;
 use helix_view::input::{KeyCode, KeyEvent, KeyModifiers};
-use helix_view::view::ViewPosition;
 use helix_view::{DocumentId, ViewId};
 
 use crate::job;
@@ -404,21 +403,6 @@ impl PtySession {
             } else {
                 spawn_view_id
             };
-            // Every view currently showing this doc, gathered before `doc`
-            // borrows `editor` mutably below — used to re-pin scroll
-            // position after `apply`, since its anchor-remapping (needed so
-            // a saved scroll position tracks surrounding *text* edits)
-            // otherwise drifts a stored offset away from 0 as the screen
-            // gets diffed/replaced wholesale on every frame, including for
-            // views that aren't focused right now. Left uncorrected, that
-            // stale offset is what a view snaps back to when the user
-            // switches back to a terminal buffer that kept redrawing in the
-            // background (e.g. `btop`, `lazygit`) while they were elsewhere.
-            let doc_view_ids: Vec<ViewId> = editor
-                .tree
-                .views()
-                .filter_map(|(view, _)| (view.doc == doc_id).then_some(view.id))
-                .collect();
             let Some(doc) = editor.document_mut(doc_id) else {
                 return;
             };
@@ -470,9 +454,14 @@ impl PtySession {
             let new_text = helix_core::Rope::from(text.as_str());
             let transaction = helix_core::diff::compare_ropes(doc.text(), &new_text);
             doc.apply(&transaction, view_id);
-            for vid in &doc_view_ids {
-                doc.set_view_offset(*vid, ViewPosition::default());
-            }
+            // A terminal buffer is never "saved" in any meaningful sense,
+            // but its content changing every frame would otherwise leave it
+            // permanently `is_modified() == true` (there's nothing else to
+            // commit these changes to history and clear it, since
+            // `append_changes_to_history` is skipped for terminal buffers -
+            // see `ui/editor.rs`) - forcing `:q`/`:qa` to need `!` for a
+            // buffer the user never asked to persist in the first place.
+            doc.discard_pending_changes();
 
             // Helix draws its (block) cursor by highlighting whatever the
             // document's selection currently points at, not via the real

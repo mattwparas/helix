@@ -1999,7 +1999,10 @@ impl Editor {
                 // of `self.tree`, which is mutably borrowed when `view_mut` is called.
                 let remove_empty_scratch = !doc.is_modified()
                     // If the buffer has no path and is not modified, it is an empty scratch buffer.
+                    // A terminal buffer also has no path, but isn't empty or disposable -
+                    // see `Document::is_terminal_buffer`.
                     && doc.path().is_none()
+                    && !doc.is_terminal_buffer
                     // If the buffer we are changing to is not this buffer
                     && id != doc.id
                     // Ensure the buffer is not displayed in any other splits.

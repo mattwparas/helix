@@ -5713,8 +5713,9 @@ fn term_buffer_spawn_impl(
     // Callers name the buffer via `document-set-bufferline-name!` with the
     // returned doc-id, since `set-bufferline-name!`'s "current buffer"
     // convention no longer points at it yet.
-    let new_doc =
+    let mut new_doc =
         helix_view::Document::default(cx.editor.config.clone(), cx.editor.syn_loader.clone());
+    new_doc.is_terminal_buffer = true;
     let doc_id = cx.editor.new_document(new_doc);
 
     crate::term_pty::PtySession::spawn(doc_id, view_id, rows, cols, Some(command), shell)?;

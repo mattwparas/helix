@@ -1766,7 +1766,17 @@ impl Component for EditorView {
 
                 // Store a history state if not in insert mode. This also takes care of
                 // committing changes when leaving insert mode.
-                if mode != Mode::Insert {
+                //
+                // Skipped for terminal buffers: their content changes every
+                // frame from `refresh_document`, not from user edits, so
+                // committing it here would both pollute undo with per-frame
+                // screen diffs and (since it advances the history revision
+                // counter) make `is_modified` report `true` forever after
+                // the next keypress that reaches this far in Normal mode
+                // (e.g. the `<F12>` that detaches from it) — `discard_pending_changes`
+                // in `term_pty::refresh_document` is what's meant to keep it
+                // clean instead.
+                if mode != Mode::Insert && !term_pty::is_terminal(doc.id()) {
                     doc.append_changes_to_history(view);
                 }
                 let callback = if callbacks.is_empty() {

@@ -665,7 +665,8 @@ fn terminal_new(
     // Created but not switched to yet: term_pty::PtySession reveals it once
     // the child process has actually produced something to show, instead of
     // flashing an empty buffer during its own shell-fork/exec/init latency.
-    let new_doc = Document::default(cx.editor.config.clone(), cx.editor.syn_loader.clone());
+    let mut new_doc = Document::default(cx.editor.config.clone(), cx.editor.syn_loader.clone());
+    new_doc.is_terminal_buffer = true;
     let doc_id = cx.editor.new_document(new_doc);
     cx.editor.document_mut(doc_id).unwrap().bufferline_name = Some("term".to_string());
 

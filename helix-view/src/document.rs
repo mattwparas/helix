@@ -221,6 +221,32 @@ pub struct Document {
     // is meant for the statusline, not a narrow tab).
     pub bufferline_name: Option<String>,
     pub readonly: bool,
+    /// Whether this document is a terminal buffer (a running child
+    /// process's PTY output kept live-synced into a `Document`, with no
+    /// backing file) rather than a normal buffer that merely happens to
+    /// have no path yet, like a genuinely empty scratch buffer. Two things
+    /// key off this:
+    ///
+    /// - Every view showing the document always renders (and places the
+    ///   cursor, and maps mouse coordinates) as if scrolled to
+    ///   `ViewPosition::default()`, ignoring whatever offset is actually
+    ///   stored for that view. A terminal buffer's content is always
+    ///   exactly the size of the viewport rather than scrollable text - a
+    ///   stored offset only exists because it's incidentally the same
+    ///   storage normal buffers use, and would otherwise drift out from
+    ///   under a background-refreshing terminal buffer (see
+    ///   `Document::apply`'s anchor remapping) with no per-keystroke
+    ///   correction to pull it back, since terminal buffers also skip
+    ///   `ensure_cursor_in_view`.
+    /// - `Editor::switch`'s "delete an empty scratch buffer when navigating
+    ///   away from it" cleanup does not apply. That heuristic identifies a
+    ///   scratch buffer by `path().is_none()`, which a terminal buffer also
+    ///   satisfies despite being neither empty nor disposable - without
+    ///   this exemption, switching away from any terminal buffer that
+    ///   happens to be unmodified (which, unlike a real edit, it always is;
+    ///   see `discard_pending_changes`) silently deletes the `Document`
+    ///   out from under its still-running child process.
+    pub is_terminal_buffer: bool,
 
     pub previous_diagnostic_ids: HashMap<LanguageServerId, String>,
 
@@ -792,6 +818,7 @@ impl Document {
             name: None,
             bufferline_name: None,
             readonly: false,
+            is_terminal_buffer: false,
             jump_labels: HashMap::new(),
             document_highlights: HashMap::new(),
             script_highlights: HashMap::new(),
@@ -1901,6 +1928,18 @@ impl Document {
         current_revision != self.last_saved_revision || !self.changes.is_empty()
     }
 
+    /// Discards change-tracking accumulated since the last history commit,
+    /// without committing it to undo history or touching the saved-revision
+    /// counter. Unlike `append_changes_to_history`, this doesn't require
+    /// `old_state` to be set, so it's safe to call even when nothing has
+    /// been recorded yet. For a document that never calls
+    /// `append_changes_to_history` at all (a terminal buffer, whose content
+    /// changes every frame but was never "edited" in any sense a user would
+    /// want to undo), this is what keeps `is_modified` reporting `false`.
+    pub fn discard_pending_changes(&mut self) {
+        self.changes = ChangeSet::new(self.text().slice(..));
+    }
+
     /// Save modifications to history, and so [`Self::is_modified`] will return false.
     pub fn reset_modified(&mut self) {
         let history = self.history.take();
@@ -2169,6 +2208,9 @@ impl Document {
     }
 
     pub fn view_offset(&self, view_id: ViewId) -> ViewPosition {
+        if self.is_terminal_buffer {
+            return ViewPosition::default();
+        }
         self.view_data(view_id).view_position
     }
 
