@@ -70,6 +70,7 @@ use crate::{
     compositor::{self, Component, Compositor},
     filter_picker_entry,
     job::Callback,
+    term_pty,
     ui::{self, overlay::overlaid, Picker, PickerColumn, Popup, Prompt, PromptEvent},
 };
 
@@ -5985,6 +5986,20 @@ fn transpose_view(cx: &mut Context) {
 ///
 /// Maintain the current view (both the cursor's position and view in document).
 fn split(editor: &mut Editor, action: Action) {
+    let (_, doc) = current!(editor);
+    // A terminal buffer is one `Document` backed by one live PTY - splitting
+    // it doesn't give two independent terminals the way splitting a shell
+    // pane in tmux would, it gives two views of the exact same process,
+    // both accepting keystrokes. Beyond being useless (there's no scroll
+    // position to view independently either - see `Document::is_terminal_buffer`
+    // pinning both to the same spot), closing either split's view closes
+    // the shared document, which kills the process for both - surprising
+    // if the user only meant to close one pane. Simplest to just refuse.
+    if term_pty::is_terminal(doc.id()) {
+        editor.set_error("can't split a terminal buffer");
+        return;
+    }
+
     let (view, doc) = current!(editor);
     let id = doc.id();
     let selection = doc.selection(view.id).clone();
