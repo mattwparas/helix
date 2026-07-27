@@ -548,7 +548,11 @@ fn add_reverse_mapping(key: usize, label: String) {
 }
 
 fn load_component_api(engine: &mut Engine, generate_sources: bool) {
-    let module = helix_component_module(generate_sources);
+    let (module, builtin_components_module) = helix_component_module(generate_sources);
+    engine.register_steel_module(
+        "helix/components.scm".to_string(),
+        builtin_components_module,
+    );
     engine.register_module(module);
 }
 

@@ -233,7 +233,7 @@ fn push_status_elem(
     cfg.store_config(app_config);
     Ok(())
 }
-pub fn helix_component_module(generate_sources: bool) -> BuiltInModule {
+pub fn helix_component_module(generate_sources: bool) -> (BuiltInModule, String) {
     let mut module = BuiltInModule::new("helix/components");
 
     let mut builtin_components_module = include_str!("components.scm").to_string();
@@ -764,7 +764,7 @@ event: Event?"#, $name, $name));
         configure_lsp_builtins("component", &module);
     }
 
-    module
+    (module, builtin_components_module)
 }
 
 fn buffer_set_string(
