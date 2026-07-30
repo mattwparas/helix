@@ -64,7 +64,20 @@ pub fn send_blocking<T>(tx: &Sender<T>, data: T) {
     // block_on has some overhead and in practice the channel should basically
     // never be full anyway so first try sending without blocking
     if let Err(TrySendError::Full(data)) = tx.try_send(data) {
-        // set a timeout so that we just drop a message instead of freezing the editor in the worst case
-        let _ = block_on(tx.send_timeout(data, Duration::from_millis(10)));
+        // `send_timeout` arms a tokio timer, which panics with "there is no reactor
+        // running" unless the calling thread is inside a runtime context. Note that
+        // `block_on` here is `futures_executor`'s, not tokio's: it is deliberately
+        // *not* tokio's because hooks usually run on the main loop, which is itself a
+        // runtime worker thread where `Handle::block_on` would panic. So enter the
+        // runtime explicitly just to arm the timer.
+        //
+        // Without a runtime handle there is no way to bound the wait, and blocking
+        // indefinitely would freeze the editor. Dropping the message is what the
+        // timeout accomplishes in the worst case anyway, so drop it directly.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let _guard = handle.enter();
+            // set a timeout so that we just drop a message instead of freezing the editor in the worst case
+            let _ = block_on(tx.send_timeout(data, Duration::from_millis(10)));
+        }
     }
 }
