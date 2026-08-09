@@ -564,7 +564,7 @@ impl Component for Completion {
                 return;
             }
 
-            Rect::new(0, y, area.width, avail_height.min(15))
+            Rect::new(area.x, y, area.width, avail_height.min(15))
         };
 
         // clear area
