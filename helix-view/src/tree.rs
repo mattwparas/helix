@@ -328,6 +328,19 @@ impl Tree {
         }
     }
 
+    /// Try to get a mutable reference to a [View] by index.
+    ///
+    /// Does not panic if the view does not exist anymore
+    pub fn try_get_mut(&mut self, index: ViewId) -> Option<&mut View> {
+        match self.nodes.get_mut(index) {
+            Some(Node {
+                content: Content::View(view),
+                ..
+            }) => Some(view),
+            _ => None,
+        }
+    }
+
     /// Check if tree contains a [Node] with a given index.
     pub fn contains(&self, index: ViewId) -> bool {
         self.nodes.contains_key(index)

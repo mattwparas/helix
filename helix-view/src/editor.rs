@@ -2578,7 +2578,9 @@ impl Editor {
         }
 
         self.mode = Mode::Normal;
-        let (view, doc) = current!(self);
+        let Some((view, doc)) = try_current!(self) else {
+            return;
+        };
 
         try_restore_indent(doc, view);
 

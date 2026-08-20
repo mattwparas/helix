@@ -19,6 +19,22 @@ macro_rules! current {
     }};
 }
 
+/// Get the current view and document mutably as a tuple.
+/// Returns `Option<(&mut View, &mut Document)>`
+#[macro_export]
+macro_rules! try_current {
+    ($editor:expr) => {{
+        let view = $crate::try_view_mut!($editor);
+        match view {
+            Some(view) => {
+                let doc = $crate::doc_mut!($editor, &view.doc);
+                Some((view, doc))
+            }
+            None => None,
+        }
+    }};
+}
+
 #[macro_export]
 macro_rules! current_ref {
     ($editor:expr) => {{
@@ -49,6 +65,18 @@ macro_rules! view_mut {
     }};
     ($editor:expr) => {{
         $editor.tree.get_mut($editor.tree.focus)
+    }};
+}
+
+/// Tries to get the current view mutably.
+/// Returns `Option<&mut View>`
+#[macro_export]
+macro_rules! try_view_mut {
+    ($editor:expr, $id:expr) => {{
+        $editor.tree.try_get_mut($id)
+    }};
+    ($editor:expr) => {{
+        $editor.tree.try_get_mut($editor.tree.focus)
     }};
 }
 
