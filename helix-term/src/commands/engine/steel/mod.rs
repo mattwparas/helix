@@ -1485,24 +1485,42 @@ fn load_editor_api(engine: &mut Engine, generate_sources: bool) {
             CTX,
             "editor-document-reload",
             |cx: &mut Context, doc: DocumentId| -> anyhow::Result<()> {
-                let path = cx
+                let scrolloff = cx.editor.config().scrolloff;
+                let focused_view_id = view!(cx.editor).id;
+
+                let (path, view_ids) = {
+                    let Some(x) = cx.editor.documents.get_mut(&doc) else {
+                        return Ok(());
+                    };
+
+                    let mut view_ids: Vec<_> = x.selections().keys().copied().collect();
+                    if view_ids.is_empty() {
+                        x.ensure_view_init(focused_view_id);
+                        view_ids.push(focused_view_id);
+                    }
+
+                    (x.path().map(|path| path.to_path_buf()), view_ids)
+                };
+
+                let x = doc_mut!(cx.editor, &doc);
+                let view = view_mut!(cx.editor, view_ids[0]);
+                view.sync_changes(x);
+
+                let trust_full = cx
                     .editor
-                    .documents
-                    .get(&doc)
-                    .and_then(|x| x.path().map(|x| x.to_path_buf()));
+                    .workspace_trust
+                    .query(
+                        x.workspace_root(),
+                        helix_loader::workspace_trust::TrustQuery::Git,
+                    )
+                    .is_trusted();
+                x.reload(view, &cx.editor.diff_providers, trust_full)?;
 
-                for (view, _) in cx.editor.tree.views_mut() {
-                    if let Some(x) = cx.editor.documents.get_mut(&doc) {
-                        let trust_full = cx
-                            .editor
-                            .workspace_trust
-                            .query(
-                                x.workspace_root(),
-                                helix_loader::workspace_trust::TrustQuery::Git,
-                            )
-                            .is_trusted();
-
-                        x.reload(view, &cx.editor.diff_providers, trust_full)?;
+                for view_id in view_ids {
+                    let view = view_mut!(cx.editor, view_id);
+                    if view.doc == doc {
+                        view.sync_changes(x);
+                        view.ensure_cursor_in_view(x, scrolloff);
                     }
                 }
                 if let Some(path) = path {
