@@ -28,6 +28,8 @@ type CompletionFn = Box<dyn FnMut(&Editor, &str) -> Vec<Completion>>;
 type CallbackFn = Box<dyn FnMut(&mut Context, &str, PromptEvent)>;
 pub type DocFn = Box<dyn Fn(&str) -> Option<Cow<str>>>;
 
+pub const ID: &str = "prompt";
+
 pub struct Prompt {
     prompt: Cow<'static, str>,
     line: String,
@@ -618,9 +620,11 @@ impl Component for Prompt {
             _ => return EventResult::Ignored(None),
         };
 
+        let id = self.id().unwrap_or_else(|| self.type_name());
+
         let close_fn = EventResult::Consumed(Some(Box::new(|compositor: &mut Compositor, _| {
             // remove the layer
-            compositor.pop();
+            compositor.remove(id);
         })));
 
         match event {
@@ -796,5 +800,9 @@ impl Component for Prompt {
             Some(Position::new(area.y as usize + line, col)),
             editor.config().cursor_shape.from_mode(Mode::Insert),
         )
+    }
+
+    fn id(&self) -> Option<&'static str> {
+        Some(ID)
     }
 }

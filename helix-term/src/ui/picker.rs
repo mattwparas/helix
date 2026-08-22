@@ -1064,13 +1064,15 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
         };
 
         let close_fn = |picker: &mut Self| {
+            let id = picker.id().unwrap_or_else(|| picker.type_name());
+
             // if the picker is very large don't store it as last_picker to avoid
             // excessive memory consumption
             let callback: compositor::Callback =
                 if picker.matcher.snapshot().item_count() > 1_000_000 {
                     Box::new(|compositor: &mut Compositor, _ctx| {
                         // remove the layer
-                        compositor.pop();
+                        compositor.remove(id);
                     })
                 } else {
                     // stop streaming in new items in the background, really we should
@@ -1080,7 +1082,7 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
                     picker.version.fetch_add(1, atomic::Ordering::Relaxed);
                     Box::new(|compositor: &mut Compositor, _ctx| {
                         // remove the layer
-                        compositor.last_picker = compositor.pop();
+                        compositor.last_picker = compositor.remove(id);
                     })
                 };
             EventResult::Consumed(Some(callback))

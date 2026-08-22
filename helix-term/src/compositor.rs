@@ -137,7 +137,7 @@ impl Compositor {
         let idx = self
             .layers
             .iter()
-            .position(|layer| layer.id() == Some(id))?;
+            .rposition(|layer| layer.id() == Some(id))?;
         Some(self.layers.remove(idx))
     }
 
@@ -145,7 +145,7 @@ impl Compositor {
         let idx = self
             .layers
             .iter()
-            .position(|layer| layer.name() == Some(id))?;
+            .rposition(|layer| layer.name() == Some(id))?;
         Some(self.layers.remove(idx))
     }
 

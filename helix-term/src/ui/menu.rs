@@ -241,9 +241,11 @@ impl<T: Item + 'static> Component for Menu<T> {
             _ => return EventResult::Ignored(None),
         };
 
+        let id = self.id().unwrap_or_else(|| self.type_name());
+
         let close_fn: Option<Callback> = Some(Box::new(|compositor: &mut Compositor, _| {
             // remove the layer
-            compositor.pop();
+            compositor.remove(id);
         }));
 
         // Ignore tab key when supertab is turned on in order not to interfere
