@@ -293,6 +293,11 @@
 ;;Check if a document has unsaved changes
 (define editor-document-dirty? helix.editor-document-dirty?)
 
+(provide editor-document-diagnostic-counts)
+;;@doc
+;;Counts of the document's own diagnostics by severity, as (hints info warnings errors)
+(define editor-document-diagnostic-counts helix.editor-document-diagnostic-counts)
+
 (provide editor-document-reload)
 ;;@doc
 ;;Reload a document.

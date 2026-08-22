@@ -1488,6 +1488,30 @@ fn load_editor_api(engine: &mut Engine, generate_sources: bool) {
                 cx.editor.documents.get(&doc).map(|x| x.is_modified())
             },
         )
+        // Counts of the document's own diagnostics by severity, as (hints info warnings errors).
+        // Mirrors the fold in helix-term/src/ui/statusline.rs::render_diagnostics.
+        .register_fn_with_ctx(
+            CTX,
+            "editor-document-diagnostic-counts",
+            |cx: &mut Context, doc: DocumentId| -> Option<Vec<usize>> {
+                cx.editor.documents.get(&doc).map(|document| {
+                    let counts =
+                        document
+                            .diagnostics()
+                            .iter()
+                            .fold((0, 0, 0, 0), |mut counts, diag| {
+                                match diag.severity {
+                                    Some(Severity::Hint) | None => counts.0 += 1,
+                                    Some(Severity::Info) => counts.1 += 1,
+                                    Some(Severity::Warning) => counts.2 += 1,
+                                    Some(Severity::Error) => counts.3 += 1,
+                                }
+                                counts
+                            });
+                    vec![counts.0, counts.1, counts.2, counts.3]
+                })
+            },
+        )
         .register_fn_with_ctx(
             CTX,
             "editor-document-reload",
