@@ -149,6 +149,23 @@ impl Compositor {
         Some(self.layers.remove(idx))
     }
 
+    /// Remove the topmost layer matching the predicate, keeping any layers
+    /// above it in place. Closing layers use this so a layer stacked above
+    /// them is never removed in their place.
+    pub fn remove_topmost_matching(
+        &mut self,
+        predicate: impl Fn(&dyn Component) -> bool,
+    ) -> Option<Box<dyn Component>> {
+        let idx = self
+            .layers
+            .iter()
+            .rposition(|layer| predicate(layer.as_ref()))?;
+        let above: Vec<Box<dyn Component>> = self.layers.drain(idx + 1..).collect();
+        let removed = self.layers.remove(idx);
+        self.layers.extend(above);
+        Some(removed)
+    }
+
     pub fn remove_type<T: 'static>(&mut self) {
         let type_name = std::any::type_name::<T>();
         self.layers

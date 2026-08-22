@@ -941,9 +941,10 @@ impl Component for SteelDynamicComponent {
     ) -> compositor::EventResult {
         // Ignore this event off the stack
         if !is_current_generation(self.generation) {
+            let name = self.name.clone();
             return compositor::EventResult::Ignored(Some(Box::new(
-                |compositor: &mut compositor::Compositor, _| {
-                    compositor.pop();
+                move |compositor: &mut compositor::Compositor, _| {
+                    compositor.remove_topmost_matching(|layer| layer.name() == Some(&name));
                 },
             )));
         }
@@ -991,23 +992,33 @@ impl Component for SteelDynamicComponent {
                     let value = SteelEventResult::from_steelval(&v);
 
                     match value {
-                        Ok(SteelEventResult::Close) => compositor::EventResult::Consumed(Some(
-                            Box::new(|compositor: &mut compositor::Compositor, _| {
-                                // remove the layer
-                                compositor.pop();
-                            }),
-                        )),
+                        Ok(SteelEventResult::Close) => {
+                            let name = self.name.clone();
+                            compositor::EventResult::Consumed(Some(Box::new(
+                                move |compositor: &mut compositor::Compositor, _| {
+                                    // remove the layer
+                                    compositor.remove_topmost_matching(|layer| {
+                                        layer.name() == Some(&name)
+                                    });
+                                },
+                            )))
+                        }
                         Ok(SteelEventResult::Consumed) => compositor::EventResult::Consumed(None),
                         Ok(SteelEventResult::ConsumedWithoutRerender) => {
                             compositor::EventResult::ConsumedWithoutRerender
                         }
                         Ok(SteelEventResult::Ignored) => compositor::EventResult::Ignored(None),
-                        Ok(SteelEventResult::IgnoreAndClose) => compositor::EventResult::Ignored(
-                            Some(Box::new(|compositor: &mut compositor::Compositor, _| {
-                                // remove the layer
-                                compositor.pop();
-                            })),
-                        ),
+                        Ok(SteelEventResult::IgnoreAndClose) => {
+                            let name = self.name.clone();
+                            compositor::EventResult::Ignored(Some(Box::new(
+                                move |compositor: &mut compositor::Compositor, _| {
+                                    // remove the layer
+                                    compositor.remove_topmost_matching(|layer| {
+                                        layer.name() == Some(&name)
+                                    });
+                                },
+                            )))
+                        }
                         _ => compositor::EventResult::Ignored(None),
                     }
                 }

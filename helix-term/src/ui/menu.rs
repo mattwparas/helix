@@ -243,7 +243,14 @@ impl<T: Item + 'static> Component for Menu<T> {
 
         let close_fn: Option<Callback> = Some(Box::new(|compositor: &mut Compositor, _| {
             // remove the layer
-            compositor.pop();
+            compositor.remove_topmost_matching(|layer| {
+                let tn = layer.type_name();
+                // a menu can be pushed directly, wrapped in a popup (completion,
+                // code actions), or embedded in a select, which delegates events
+                tn.starts_with("helix_term::ui::menu::Menu")
+                    || tn.starts_with("helix_term::ui::popup::Popup<helix_term::ui::menu::Menu")
+                    || tn.starts_with("helix_term::ui::select::Select")
+            });
         }));
 
         // Ignore tab key when supertab is turned on in order not to interfere

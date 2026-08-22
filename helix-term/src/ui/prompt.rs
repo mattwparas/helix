@@ -620,7 +620,9 @@ impl Component for Prompt {
 
         let close_fn = EventResult::Consumed(Some(Box::new(|compositor: &mut Compositor, _| {
             // remove the layer
-            compositor.pop();
+            compositor.remove_topmost_matching(|layer| {
+                layer.type_name() == std::any::type_name::<Prompt>()
+            });
         })));
 
         match event {
