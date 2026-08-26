@@ -768,11 +768,50 @@ fn move_impl(cx: &mut Context, move_fn: MoveFn, dir: Direction, behaviour: Movem
 
 use helix_core::movement::{move_horizontally, move_vertically};
 
+/// If the focused document is a media document, movement keys page through it
+/// instead of moving a cursor: h/j (left/down) go to the previous page, k/l
+/// (up/right) to the next. Returns true when the key was handled here.
+fn media_page_move(cx: &mut Context, forward: bool) -> bool {
+    let doc = doc_mut!(cx.editor);
+    let Some(media) = doc.media.as_mut() else {
+        return false;
+    };
+    if media.kind != helix_view::media::MediaKind::Pdf {
+        // Images have no pages; swallow the key so it can't edit the buffer.
+        return true;
+    }
+    let page = media.page;
+    if !forward && page == 0 {
+        // Stay quiet at the boundary, like cursor movement at a text edge.
+        return true;
+    }
+    let target = if forward { page + 1 } else { page - 1 };
+    if media.page_count.is_some_and(|count| target >= count) {
+        return true;
+    }
+    let status = match media.goto_page(target) {
+        Ok(()) => match media.page_count {
+            Some(count) => format!("page {}/{}", target + 1, count),
+            None => format!("page {}", target + 1),
+        },
+        // Unknown page count (no pdfinfo): rasterizing past the end fails.
+        Err(err) => err.to_string(),
+    };
+    cx.editor.set_status(status);
+    true
+}
+
 fn move_char_left(cx: &mut Context) {
+    if media_page_move(cx, false) {
+        return;
+    }
     move_impl(cx, move_horizontally, Direction::Backward, Movement::Move)
 }
 
 fn move_char_right(cx: &mut Context) {
+    if media_page_move(cx, true) {
+        return;
+    }
     move_impl(cx, move_horizontally, Direction::Forward, Movement::Move)
 }
 
@@ -785,6 +824,10 @@ fn move_line_down(cx: &mut Context) {
 }
 
 fn move_visual_line_up(cx: &mut Context) {
+    // On media documents k pages forward, matching l (see media_page_move).
+    if media_page_move(cx, true) {
+        return;
+    }
     move_impl(
         cx,
         move_vertically_visual,
@@ -794,6 +837,10 @@ fn move_visual_line_up(cx: &mut Context) {
 }
 
 fn move_visual_line_down(cx: &mut Context) {
+    // On media documents j pages backward, matching h (see media_page_move).
+    if media_page_move(cx, false) {
+        return;
+    }
     move_impl(
         cx,
         move_vertically_visual,

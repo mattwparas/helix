@@ -49,7 +49,8 @@ statusline, and code actions on save) and adds the following on top:
 - **Image and PDF rendering in the editor** — `:open` on an image
   (png/jpeg/gif/webp/svg/…) or PDF renders it in the view via the kitty
   graphics protocol (unicode placeholder placements), scaled to fit,
-  aspect-preserved, read-only. PDFs support `:media-next-page`,
+  aspect-preserved, read-only. PDFs page with `h`/`j` (previous) and
+  `k`/`l` (next) — arrow keys too — plus `:media-next-page`,
   `:media-prev-page`, and `:media-goto-page N` (bindable like any typable
   command). Auto-detected on kitty/ghostty-family terminals; configurable
   with `editor.image-rendering = "auto" | "kitty" | "disabled"`. PDF pages
