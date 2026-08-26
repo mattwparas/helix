@@ -10,3 +10,9 @@
 [submodule "plugins/fake-warp.hx"]
 	path = plugins/fake-warp.hx
 	url = https://github.com/Xerxes-2/fake-warp.hx.git
+[submodule "plugins/macterm-splits.hx"]
+	path = plugins/macterm-splits.hx
+	url = git@github.com:thdxg/macterm-splits.hx.git
+[submodule "plugins/comment.hx"]
+	path = plugins/comment.hx
+	url = git@github.com:thdxg/comment.hx.git
