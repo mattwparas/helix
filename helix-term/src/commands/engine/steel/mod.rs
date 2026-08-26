@@ -124,6 +124,7 @@ fn reload_engine() {
 
         reset_buffer_extension_keymap();
         reset_lsp_call_registry();
+        reset_file_picker_open_handler();
 
         *engine = setup();
     })
@@ -451,6 +452,89 @@ static LSP_CALL_REGISTRY: Lazy<RwLock<LspCallRegistry>> = Lazy::new(|| {
 
 fn reset_lsp_call_registry() {
     LSP_CALL_REGISTRY.write().unwrap().map.clear();
+}
+
+struct FilePickerOpenHandler {
+    generation: usize,
+    callback: RootedSteelVal,
+}
+
+/// A steel function that gets the chance to handle opening a path from the
+/// file picker before the default `Editor::open` path runs. See
+/// [`dispatch_file_picker_open_handler`].
+static FILE_PICKER_OPEN_HANDLER: Lazy<RwLock<Option<FilePickerOpenHandler>>> =
+    Lazy::new(|| RwLock::new(None));
+
+fn reset_file_picker_open_handler() {
+    *FILE_PICKER_OPEN_HANDLER.write().unwrap() = None;
+}
+
+fn set_file_picker_open_handler(callback_fn: SteelVal) {
+    if matches!(callback_fn, SteelVal::BoolV(false)) {
+        reset_file_picker_open_handler();
+        return;
+    }
+
+    *FILE_PICKER_OPEN_HANDLER.write().unwrap() = Some(FilePickerOpenHandler {
+        generation: load_generation(),
+        callback: callback_fn.as_rooted(),
+    });
+}
+
+/// Give a registered steel handler the chance to handle opening a path from
+/// the file picker. Returns `true` when the handler consumed the open, i.e.
+/// it returned anything other than `#f`; the caller should then skip the
+/// default `Editor::open`.
+pub fn dispatch_file_picker_open_handler(
+    cx: &mut compositor::Context,
+    path: &std::path::Path,
+    action: Action,
+) -> bool {
+    let callback = {
+        let guard = FILE_PICKER_OPEN_HANDLER.read().unwrap();
+        match guard.as_ref() {
+            Some(handler) if is_current_generation(handler.generation) => {
+                handler.callback.value().clone()
+            }
+            _ => return false,
+        }
+    };
+
+    let action_symbol = SteelVal::SymbolV(
+        match action {
+            Action::Load => "load",
+            Action::Replace => "replace",
+            Action::HorizontalSplit => "hsplit",
+            Action::VerticalSplit => "vsplit",
+        }
+        .into(),
+    );
+    let path = path.to_string_lossy().into_owned();
+
+    with_ephemeral_context(cx, |ctx| {
+        enter_engine(|guard| {
+            let result = guard
+                .with_mut_reference::<Context, Context>(ctx)
+                .consume_once(move |engine, args| {
+                    let context = args.into_iter().next().unwrap();
+                    engine.update_value(CTX, context);
+                    engine.call_function_with_args(
+                        callback,
+                        vec![path.into_steelval().unwrap(), action_symbol],
+                    )
+                });
+
+            match result {
+                Ok(value) => !matches!(value, SteelVal::BoolV(false)),
+                // Fall back to the default open so a buggy handler doesn't
+                // leave the picker doing nothing at all.
+                Err(e) => {
+                    present_error_inside_engine_context(ctx, guard, e);
+                    false
+                }
+            }
+        })
+    })
 }
 
 fn register_lsp_call_callback(lsp: String, kind: String, function: SteelVal) {
@@ -1437,6 +1521,10 @@ fn load_editor_api(engine: &mut Engine, generate_sources: bool) {
     let builtin_editor_command_module = include_str!("editor.scm").to_string();
 
     module.register_fn("register-hook", register_hook);
+    module.register_fn(
+        "set-file-picker-open-handler!",
+        set_file_picker_open_handler,
+    );
 
     module
         .register_fn("Action/Load", || Action::Load)

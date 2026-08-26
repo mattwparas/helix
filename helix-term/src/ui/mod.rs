@@ -279,6 +279,10 @@ pub fn file_picker(editor: &Editor, root: PathBuf) -> FilePicker {
         },
     )];
     let picker = Picker::new(columns, 0, [], data, move |cx, path: &PathBuf, action| {
+        #[cfg(feature = "steel")]
+        if crate::commands::engine::steel::dispatch_file_picker_open_handler(cx, path, action) {
+            return;
+        }
         if let Err(e) = cx.editor.open(path, action) {
             let err = if let Some(err) = e.source() {
                 format!("{}", err)

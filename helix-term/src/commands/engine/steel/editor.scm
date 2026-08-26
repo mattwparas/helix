@@ -103,6 +103,31 @@
 (define (register-hook event-kind callback-fn)
   (helix.register-hook event-kind callback-fn))
 
+(provide set-file-picker-open-handler!)
+;;@doc
+;; Install a handler that gets the chance to open files selected in the file
+;; picker before the default open path runs. The handler is called with two
+;; arguments: the selected path as a string, and the requested action as one
+;; of the symbols 'replace (enter), 'vsplit (ctrl-v), 'hsplit (ctrl-s) or
+;; 'load. Return `#f` to fall back to the default behavior for that action;
+;; any other return value marks the open as handled.
+;;
+;; Only one handler can be installed at a time; installing a new one replaces
+;; the previous handler. Pass `#f` instead of a function to remove the
+;; current handler.
+;;
+;; ```scheme
+;; (set-file-picker-open-handler!
+;;  (lambda (path action)
+;;    (if (equal? action 'vsplit)
+;;        (begin
+;;          (open-in-my-terminal path)
+;;          #t)
+;;        #f)))
+;; ```
+(define (set-file-picker-open-handler! callback-fn)
+  (helix.set-file-picker-open-handler! callback-fn))
+
 ;;@doc
 ;; Get the ID of the closed document
 (provide doc-closed-id)
