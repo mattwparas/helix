@@ -135,6 +135,9 @@ impl Application {
         );
         Self::load_configured_theme(&mut editor, &config.load(), &mut terminal, theme_mode);
 
+        editor.graphics.mode =
+            helix_view::media::detect_graphics_mode(config.load().editor.image_rendering);
+
         let keys = Box::new(Map::new(Arc::clone(&config), |config: &Config| {
             &config.keys
         }));
@@ -302,12 +305,20 @@ impl Application {
 
         // TODO: need to recalculate view tree if necessary
 
+        // Refresh pixel metrics so media placements scale correctly.
+        cx.editor.graphics.window_px = self.terminal.window_pixel_size();
+
         let surface = self.terminal.current_buffer_mut();
 
         self.compositor.render(area, surface, &mut cx);
         let (pos, kind) = self.compositor.cursor(area, &self.editor);
         // reset cursor cache
         self.editor.cursor_cache.reset();
+
+        // Transmit any newly placed images before the cells referencing them.
+        for escape in self.editor.graphics.take_pending() {
+            let _ = self.terminal.write_raw(escape.as_bytes());
+        }
 
         let pos = pos.map(|pos| (pos.col as u16, pos.row as u16));
         self.terminal.draw(pos, kind).unwrap();
@@ -478,6 +489,8 @@ impl Application {
             }
 
             self.terminal.reconfigure((&default_config.editor).into())?;
+            self.editor.graphics.mode =
+                helix_view::media::detect_graphics_mode(default_config.editor.image_rendering);
             // Store new config
             self.config.store(Arc::new(default_config));
 
@@ -612,6 +625,9 @@ impl Application {
                 let area = self.terminal.size();
                 self.compositor.resize(area);
                 self.terminal.clear().expect("couldn't clear terminal");
+                // Images may have been dropped while the terminal was
+                // released; retransmit placements lazily.
+                self.editor.graphics.reset();
 
                 self.render().await;
             }

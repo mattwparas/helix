@@ -146,6 +146,72 @@ fn open(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow:
     open_impl(cx, args, Action::Replace)
 }
 
+/// Move a media (PDF) document to the given zero-based page.
+fn media_goto_page_impl(cx: &mut compositor::Context, page: usize) -> anyhow::Result<()> {
+    let doc = doc_mut!(cx.editor);
+    let media = doc
+        .media
+        .as_mut()
+        .ok_or_else(|| anyhow!("not a media document"))?;
+    media.goto_page(page)?;
+    let status = match media.page_count {
+        Some(count) => format!("page {}/{}", page + 1, count),
+        None => format!("page {}", page + 1),
+    };
+    cx.editor.set_status(status);
+    Ok(())
+}
+
+fn media_next_page(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    let doc = doc!(cx.editor);
+    let page = doc
+        .media
+        .as_ref()
+        .ok_or_else(|| anyhow!("not a media document"))?
+        .page;
+    media_goto_page_impl(cx, page + 1)
+}
+
+fn media_prev_page(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    let doc = doc!(cx.editor);
+    let page = doc
+        .media
+        .as_ref()
+        .ok_or_else(|| anyhow!("not a media document"))?
+        .page;
+    if page == 0 {
+        bail!("already on the first page");
+    }
+    media_goto_page_impl(cx, page - 1)
+}
+
+fn media_goto_page(
+    cx: &mut compositor::Context,
+    args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    let page: usize = args[0].parse().context("page must be a number")?;
+    ensure!(page > 0, "pages are numbered from 1");
+    media_goto_page_impl(cx, page - 1)
+}
+
 fn open_impl(cx: &mut compositor::Context, args: Args, action: Action) -> anyhow::Result<()> {
     for arg in args {
         let (path, pos) = crate::args::parse_file(&arg);
@@ -3064,6 +3130,39 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         completer: CommandCompleter::all(completers::filename),
         signature: Signature {
             positionals: (1, None),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "media-next-page",
+        aliases: &[],
+        doc: "Go to the next page of a media document (PDF).",
+        fun: media_next_page,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "media-prev-page",
+        aliases: &[],
+        doc: "Go to the previous page of a media document (PDF).",
+        fun: media_prev_page,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "media-goto-page",
+        aliases: &[],
+        doc: "Go to a page (1-based) of a media document (PDF).",
+        fun: media_goto_page,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (1, Some(1)),
             ..Signature::DEFAULT
         },
     },

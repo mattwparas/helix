@@ -5,6 +5,9 @@
 | `:quit`, `:q` | Close the current view. |
 | `:quit!`, `:q!` | Force close the current view, ignoring unsaved changes. |
 | `:open`, `:o`, `:edit`, `:e` | Open a file from disk into the current view. |
+| `:media-next-page` | Go to the next page of a media document (PDF). |
+| `:media-prev-page` | Go to the previous page of a media document (PDF). |
+| `:media-goto-page` | Go to a page (1-based) of a media document (PDF). |
 | `:buffer-close`, `:bc`, `:bclose` | Close the current buffer. |
 | `:buffer-close!`, `:bc!`, `:bclose!` | Close the current buffer forcefully, ignoring unsaved changes. |
 | `:buffer-close-others`, `:bco`, `:bcloseother` | Close all buffers but the currently focused one. |

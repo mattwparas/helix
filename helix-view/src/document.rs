@@ -136,6 +136,8 @@ pub enum DocumentOpenError {
     IrregularFile,
     #[error(transparent)]
     IoError(#[from] io::Error),
+    #[error("{0}")]
+    Media(anyhow::Error),
 }
 
 pub struct Document {
@@ -226,6 +228,11 @@ pub struct Document {
     // A name separate from the file name
     pub name: Option<String>,
     pub readonly: bool,
+
+    /// Set when this document is a rendered media file (image/PDF) rather
+    /// than text. Media documents hold no text, cannot be edited or saved,
+    /// and are rendered graphically. See [`crate::media`].
+    pub media: Option<crate::media::MediaState>,
 
     pub previous_diagnostic_ids: HashMap<LanguageServerId, String>,
 
@@ -783,6 +790,7 @@ impl Document {
             focused_at: std::time::Instant::now(),
             name: None,
             readonly: false,
+            media: None,
             jump_labels: HashMap::new(),
             document_highlights: HashMap::new(),
             code_action_hints: HashSet::new(),
@@ -821,6 +829,24 @@ impl Document {
         // If the path is not a regular file (e.g.: /dev/random) it should not be opened.
         if path.metadata().is_ok_and(|metadata| !metadata.is_file()) {
             return Err(DocumentOpenError::IrregularFile);
+        }
+
+        // Images and PDFs open as rendered media documents instead of text.
+        if path.exists() {
+            if let Some(kind) = crate::media::detect_kind(path) {
+                let media =
+                    crate::media::MediaState::open(kind, path).map_err(DocumentOpenError::Media)?;
+                let mut doc = Self::from(
+                    Rope::from(helix_core::NATIVE_LINE_ENDING.as_str()),
+                    None,
+                    config,
+                    syn_loader,
+                );
+                doc.set_path(Some(path));
+                doc.media = Some(media);
+                doc.readonly = true;
+                return Ok(doc);
+            }
         }
 
         let editor_config = if config.load().editor_config {
@@ -1023,6 +1049,10 @@ impl Document {
         impl Future<Output = Result<DocumentSavedEvent, anyhow::Error>> + 'static + Send,
         anyhow::Error,
     > {
+        if self.media.is_some() {
+            bail!("cannot save a media document (rendered preview)");
+        }
+
         log::debug!(
             "submitting save of doc '{:?}'",
             self.path().map(|path| path.to_string_lossy())
@@ -1317,6 +1347,17 @@ impl Document {
                 false => bail!("can't find file to reload from {:?}", self.display_name()),
             },
         };
+
+        // Media documents re-rasterize instead of reloading text. The new
+        // raster gets a fresh image id (mtime is hashed in), so the next
+        // render retransmits automatically.
+        if let Some(media) = &self.media {
+            let kind = media.kind;
+            self.media = Some(
+                crate::media::MediaState::open(kind, &path).map_err(|err| anyhow!("{err}"))?,
+            );
+            return Ok(());
+        }
 
         // Once we have a valid path we check if its readonly status has changed
         self.detect_readonly();
@@ -1854,6 +1895,10 @@ impl Document {
 
     /// If there are unsaved modifications.
     pub fn is_modified(&self) -> bool {
+        // Media documents have no editable content to lose.
+        if self.media.is_some() {
+            return false;
+        }
         let history = self.history.take();
         let current_revision = history.current_revision();
         self.history.set(history);

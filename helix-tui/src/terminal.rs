@@ -146,6 +146,17 @@ where
         &mut self.backend
     }
 
+    /// Writes raw bytes (e.g. graphics escape sequences) into the backend's
+    /// output buffer, to be sent with the next flush.
+    pub fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.backend.write_raw(bytes)
+    }
+
+    /// The terminal window size in pixels, if the platform reports it.
+    pub fn window_pixel_size(&self) -> Option<(u16, u16)> {
+        self.backend.window_pixel_size()
+    }
+
     /// Obtains a difference between the previous and the current buffer and passes it to the
     /// current backend for drawing.
     pub fn flush(&mut self) -> io::Result<()> {

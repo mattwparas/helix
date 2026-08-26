@@ -85,7 +85,10 @@ impl EditorView {
     ) {
         let doc = cx.editor.document(doc_id).unwrap();
         let view = cx.editor.tree.get(view_id);
-        {
+        let view_area = view.area;
+        if doc.media.is_some() {
+            Self::render_media_view(doc_id, view_id, viewport, surface, cx);
+        } else {
             let editor = &cx.editor;
 
             let inner = view.inner_area(doc);
@@ -246,9 +249,8 @@ impl EditorView {
             }
         }
 
-        let statusline_area = view
-            .area
-            .clip_top(view.area.height.saturating_sub(1))
+        let statusline_area = view_area
+            .clip_top(view_area.height.saturating_sub(1))
             .clip_bottom(1); // -1 from bottom to remove commandline
 
         let mut context = statusline::RenderContext::new(
@@ -261,6 +263,136 @@ impl EditorView {
         );
 
         statusline::render(&mut context, statusline_area, surface);
+    }
+
+    /// Render a media document (image/PDF) as a kitty unicode-placeholder
+    /// placement, or as an informational fallback when graphics are
+    /// unavailable. See `helix_view::media`.
+    fn render_media_view(
+        doc_id: DocumentId,
+        view_id: ViewId,
+        viewport: Rect,
+        surface: &mut Surface,
+        cx: &mut Context,
+    ) {
+        use helix_view::media;
+
+        let editor = &mut *cx.editor;
+        let theme = &editor.theme;
+        let text_style = theme.get("ui.text");
+        let comment_style = theme.get("comment");
+        let border_style = theme.get("ui.window");
+
+        let view = editor.tree.get(view_id);
+        let view_area = view.area;
+        let doc = editor
+            .documents
+            .get(&doc_id)
+            .expect("media view referenced missing doc");
+        let inner = view.inner_area(doc);
+        let media = doc.media.as_ref().expect("media doc without media state");
+        let raster = media.raster.clone();
+        let kind = media.kind;
+        let (page, page_count) = (media.page, media.page_count);
+        let display_name = doc.display_name().into_owned();
+
+        let caption = match kind {
+            media::MediaKind::Pdf => match page_count {
+                Some(count) => format!("page {}/{}", page + 1, count),
+                None => format!("page {}", page + 1),
+            },
+            media::MediaKind::Image => format!("{}\u{00d7}{}", raster.width, raster.height),
+        };
+
+        if inner.width > 0 && inner.height > 0 {
+            let total = surface.area;
+            let cell_px = editor.graphics.cell_px(total.width, total.height);
+            let (cols, rows) = media::fit_placement(
+                (raster.width, raster.height),
+                (inner.width, inner.height),
+                cell_px,
+                kind == media::MediaKind::Pdf,
+            );
+
+            if editor.graphics.ensure_placement(&raster, cols, rows) {
+                let x0 = inner.x + (inner.width - cols) / 2;
+                let y0 = inner.y + (inner.height - rows) / 2;
+                // The placeholder's foreground color carries the image id.
+                let id_style = Style::default().fg(Color::Rgb(
+                    (raster.id >> 16) as u8,
+                    (raster.id >> 8) as u8,
+                    raster.id as u8,
+                ));
+                let mut symbol = String::with_capacity(12);
+                for row in 0..rows {
+                    for col in 0..cols {
+                        let Some(chars) = media::placeholder_symbol(row, col) else {
+                            continue;
+                        };
+                        symbol.clear();
+                        symbol.extend(chars);
+                        surface[(x0 + col, y0 + row)]
+                            .set_symbol(&symbol)
+                            .set_style(id_style);
+                    }
+                }
+                // Caption on the line below the image, if there is room.
+                let caption_y = y0 + rows;
+                if caption_y < inner.y + inner.height {
+                    let x = inner.x + (inner.width.saturating_sub(caption.len() as u16)) / 2;
+                    surface.set_string_truncated(
+                        x,
+                        caption_y,
+                        &caption,
+                        inner.width as usize,
+                        |_| comment_style,
+                        true,
+                        false,
+                    );
+                }
+            } else {
+                // No graphics support: show what the file is instead of
+                // rendering binary garbage.
+                let label = match kind {
+                    media::MediaKind::Pdf => "PDF document",
+                    media::MediaKind::Image => "image",
+                };
+                let lines = [
+                    display_name,
+                    format!("{label} \u{2014} {caption}"),
+                    "graphical rendering unavailable in this terminal".to_string(),
+                    "(set editor.image-rendering = \"kitty\" to force)".to_string(),
+                ];
+                let y0 = inner.y + (inner.height.saturating_sub(lines.len() as u16)) / 2;
+                for (i, line) in lines.iter().enumerate() {
+                    let y = y0 + i as u16;
+                    if y >= inner.y + inner.height {
+                        break;
+                    }
+                    let x = inner.x + (inner.width.saturating_sub(line.len() as u16)) / 2;
+                    let style = if i < 2 { text_style } else { comment_style };
+                    surface.set_string_truncated(
+                        x,
+                        y,
+                        line,
+                        inner.width as usize,
+                        |_| style,
+                        true,
+                        false,
+                    );
+                }
+            }
+        }
+
+        // if we're not at the edge of the screen, draw a right border
+        if viewport.right() != view_area.right() {
+            let x = view_area.right();
+            for y in view_area.top()..view_area.bottom() {
+                surface[(x, y)]
+                    .set_symbol(tui::symbols::line::VERTICAL)
+                    .set_style(border_style);
+            }
+        }
     }
 
     pub fn render_rulers(
@@ -1790,6 +1922,15 @@ impl Component for EditorView {
     }
 
     fn cursor(&self, _area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {
+        {
+            // A visible cursor would puncture a media placement: cursor
+            // styles that swap fg/bg destroy the image id encoded in the
+            // placeholder cell's foreground color.
+            let (_, doc) = helix_view::current_ref!(editor);
+            if doc.media.is_some() {
+                return (None, CursorKind::Hidden);
+            }
+        }
         match editor.cursor() {
             // all block cursors are drawn manually
             (pos, CursorKind::Block) => {

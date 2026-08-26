@@ -432,6 +432,9 @@ pub struct Config {
     pub rainbow_brackets: bool,
     /// Whether to enable Kitty Keyboard Protocol
     pub kitty_keyboard_protocol: KittyKeyboardProtocolConfig,
+    /// Graphical rendering of images/PDFs (kitty graphics protocol).
+    /// Defaults to auto-detection by terminal.
+    pub image_rendering: crate::media::ImageRenderingConfig,
 
     pub buffer_picker: BufferPickerConfig,
 
@@ -1296,6 +1299,7 @@ impl Default for Config {
             editor_config: true,
             rainbow_brackets: false,
             kitty_keyboard_protocol: Default::default(),
+            image_rendering: Default::default(),
             buffer_picker: BufferPickerConfig::default(),
             #[cfg(feature = "steel")]
             enable_steel: true,
@@ -1407,6 +1411,9 @@ pub struct Editor {
 
     pub mouse_down_range: Option<Range>,
     pub cursor_cache: CursorCache,
+
+    /// Terminal graphics (image rendering) state. See [`crate::media`].
+    pub graphics: crate::media::GraphicsState,
 
     pub editor_clipping: ClippingConfiguration,
 
@@ -1554,6 +1561,7 @@ impl Editor {
             handlers,
             mouse_down_range: None,
             cursor_cache: CursorCache::default(),
+            graphics: crate::media::GraphicsState::default(),
             editor_clipping: ClippingConfiguration::default(),
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
             workspace_trust,

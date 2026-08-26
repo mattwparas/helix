@@ -608,6 +608,15 @@ impl Backend for TerminaBackend {
         Ok(Rect::new(0, 0, cols, rows))
     }
 
+    fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.terminal.write_all(bytes)
+    }
+
+    fn window_pixel_size(&self) -> Option<(u16, u16)> {
+        let size = self.terminal.get_dimensions().ok()?;
+        Some((size.pixel_width?, size.pixel_height?))
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         self.terminal.flush()
     }

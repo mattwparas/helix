@@ -49,4 +49,13 @@ pub trait Backend {
     fn supports_true_color(&self) -> bool;
     fn get_theme_mode(&self) -> Option<helix_view::theme::Mode>;
     fn set_background_color(&mut self, color: Option<Color>) -> io::Result<()>;
+    /// Writes raw bytes (e.g. graphics escape sequences) into the terminal's
+    /// output buffer, to be sent with the next flush.
+    fn write_raw(&mut self, _bytes: &[u8]) -> io::Result<()> {
+        Ok(())
+    }
+    /// The terminal window size in pixels, if the platform reports it.
+    fn window_pixel_size(&self) -> Option<(u16, u16)> {
+        None
+    }
 }

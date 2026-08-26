@@ -30,6 +30,35 @@ All shortcuts/keymaps can be found [in the documentation on the website](https:/
 
 [Troubleshooting](https://github.com/helix-editor/helix/wiki/Troubleshooting)
 
+# Changes in this fork
+
+This repo tracks [mattwparas/helix](https://github.com/mattwparas/helix)'s
+`steel-event-system` branch (upstream Helix plus the
+[Steel](https://github.com/mattwparas/steel) plugin system, customizable
+statusline, and code actions on save) and adds the following on top:
+
+- **File watching with external-change auto-reload** — unmodified buffers
+  reload automatically when their files change on disk (macOS backend via
+  filesentry); modified buffers surface a conflict warning instead
+  (`helix-view/src/document.rs`, `[editor.auto-reload]`).
+- **Vim-style handling of externally deleted files** — when an open file is
+  deleted from disk the buffer is kept and marked modified rather than
+  closed; `:w` recreates the file.
+- **Snappy `:q` with LSP servers running** — the shutdown flush wait is
+  capped so quitting no longer hangs ~1s per language server.
+- **Image and PDF rendering in the editor** — `:open` on an image
+  (png/jpeg/gif/webp/svg/…) or PDF renders it in the view via the kitty
+  graphics protocol (unicode placeholder placements), scaled to fit,
+  aspect-preserved, read-only. PDFs support `:media-next-page`,
+  `:media-prev-page`, and `:media-goto-page N` (bindable like any typable
+  command). Auto-detected on kitty/ghostty-family terminals; configurable
+  with `editor.image-rendering = "auto" | "kitty" | "disabled"`. PDF pages
+  rasterize through `pdftoppm` (poppler); non-PNG images convert through
+  `magick`/`convert`/`sips`, whichever is present. Terminals without
+  graphics support get a text fallback instead of binary garbage.
+- **Steel/event fixes** — `send_blocking` no longer panics without a tokio
+  reactor; Steel pinned past a thread-spawning bug.
+
 # Features
 
 - Vim-like modal editing
