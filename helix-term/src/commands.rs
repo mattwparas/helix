@@ -769,8 +769,8 @@ fn move_impl(cx: &mut Context, move_fn: MoveFn, dir: Direction, behaviour: Movem
 use helix_core::movement::{move_horizontally, move_vertically};
 
 /// If the focused document is a media document, movement keys page through it
-/// instead of moving a cursor: h/j (left/down) go to the previous page, k/l
-/// (up/right) to the next. Returns true when the key was handled here.
+/// instead of moving a cursor: h/k (left/up) go to the previous page, j/l
+/// (down/right) to the next. Returns true when the key was handled here.
 fn media_page_move(cx: &mut Context, forward: bool) -> bool {
     let doc = doc_mut!(cx.editor);
     let Some(media) = doc.media.as_mut() else {
@@ -824,8 +824,8 @@ fn move_line_down(cx: &mut Context) {
 }
 
 fn move_visual_line_up(cx: &mut Context) {
-    // On media documents k pages forward, matching l (see media_page_move).
-    if media_page_move(cx, true) {
+    // On media documents k pages backward, matching h (see media_page_move).
+    if media_page_move(cx, false) {
         return;
     }
     move_impl(
@@ -837,8 +837,8 @@ fn move_visual_line_up(cx: &mut Context) {
 }
 
 fn move_visual_line_down(cx: &mut Context) {
-    // On media documents j pages backward, matching h (see media_page_move).
-    if media_page_move(cx, false) {
+    // On media documents j pages forward, matching l (see media_page_move).
+    if media_page_move(cx, true) {
         return;
     }
     move_impl(
