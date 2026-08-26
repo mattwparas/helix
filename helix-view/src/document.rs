@@ -1353,9 +1353,23 @@ impl Document {
         // render retransmits automatically.
         if let Some(media) = &self.media {
             let kind = media.kind;
-            self.media = Some(
-                crate::media::MediaState::open(kind, &path).map_err(|err| anyhow!("{err}"))?,
-            );
+            let old_page = media.page;
+            let mut state =
+                crate::media::MediaState::open(kind, &path).map_err(|err| anyhow!("{err}"))?;
+            // Stay on the page being read (clamped: the new file may be
+            // shorter); fall back to the first page if it can't be rastered.
+            if old_page > 0 {
+                let target = match state.page_count {
+                    Some(count) => old_page.min(count.saturating_sub(1)),
+                    None => old_page,
+                };
+                let _ = state.goto_page(target);
+            }
+            self.media = Some(state);
+            // Record the on-disk mtime like the text path does, so the
+            // auto-reload poll sees the document as up to date instead of
+            // re-rasterizing on every tick.
+            self.pickup_last_saved_time();
             return Ok(());
         }
 
