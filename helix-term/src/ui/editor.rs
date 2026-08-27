@@ -289,7 +289,10 @@ impl EditorView {
             .documents
             .get(&doc_id)
             .expect("media view referenced missing doc");
-        let inner = view.inner_area(doc);
+        // Media views draw no gutter, so centre against the whole view area
+        // rather than `inner_area`, which reserves (unused) gutter columns and
+        // would push the placement to the right.
+        let inner = view_area.clip_bottom(1); // -1 for the statusline
         let media = doc.media.as_ref().expect("media doc without media state");
         let raster = media.raster.clone();
         let kind = media.kind;
