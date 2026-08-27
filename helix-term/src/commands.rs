@@ -770,8 +770,10 @@ use helix_core::movement::{move_horizontally, move_vertically};
 
 /// If the focused document is a media document, movement keys page through it
 /// instead of moving a cursor: h/k (left/up) go to the previous page, j/l
-/// (down/right) to the next. Returns true when the key was handled here.
-fn media_page_move(cx: &mut Context, forward: bool) -> bool {
+/// (down/right) to the next. The mouse wheel pages the same way (see
+/// `EditorView::handle_mouse_event`). Returns true when the key was handled
+/// here.
+pub(crate) fn media_page_move(cx: &mut Context, forward: bool) -> bool {
     let doc = doc_mut!(cx.editor);
     let Some(media) = doc.media.as_mut() else {
         return false;

@@ -31,7 +31,14 @@ use helix_view::{
     keyboard::{KeyCode, KeyModifiers},
     Document, DocumentId, Editor, Theme, View, ViewId,
 };
-use std::{mem::take, num::NonZeroUsize, ops, path::PathBuf, rc::Rc};
+use std::{
+    mem::take,
+    num::NonZeroUsize,
+    ops,
+    path::PathBuf,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use tui::{buffer::Buffer as Surface, text::Span};
 
@@ -44,7 +51,12 @@ pub struct EditorView {
     spinners: ProgressSpinners,
     /// Tracks if the terminal window is focused by reaction to terminal focus events
     terminal_focused: bool,
+    /// When the mouse wheel last turned a media document's page.
+    last_media_page: Option<Instant>,
 }
+
+/// Minimum gap between wheel-driven page turns in a media document.
+const MEDIA_SCROLL_INTERVAL: Duration = Duration::from_millis(120);
 
 #[derive(Debug, Clone)]
 pub enum InsertEvent {
@@ -67,6 +79,7 @@ impl EditorView {
             completion: None,
             spinners: ProgressSpinners::default(),
             terminal_focused: true,
+            last_media_page: None,
         }
     }
 
@@ -1385,6 +1398,19 @@ impl EditorView {
             })
         };
 
+        // Media documents have no text to hit-test against (and no gutter), so
+        // find their view by area alone.
+        let media_view_at = |editor: &Editor, row, column| {
+            editor.tree.views().find_map(|(view, _focus)| {
+                let area = view.area;
+                let inside = row >= area.top()
+                    && row < area.bottom()
+                    && column >= area.left()
+                    && column < area.right();
+                (inside && editor.documents[&view.doc].media.is_some()).then_some(view.id)
+            })
+        };
+
         let gutter_coords_and_view = |editor: &Editor, row, column| {
             editor.tree.views().find_map(|(view, _focus)| {
                 view.gutter_coords_at_screen_coords(row, column)
@@ -1473,6 +1499,23 @@ impl EditorView {
                     MouseEventKind::ScrollDown => Direction::Forward,
                     _ => unreachable!(),
                 };
+
+                // Scrolling over a media view pages through it instead, but a
+                // single trackpad swipe emits a burst of events: rate-limit so
+                // one gesture does not fly through the whole document.
+                if let Some(view_id) = media_view_at(cxt.editor, row, column) {
+                    let now = Instant::now();
+                    let ready = self
+                        .last_media_page
+                        .is_none_or(|last| now.duration_since(last) >= MEDIA_SCROLL_INTERVAL);
+                    if ready {
+                        self.last_media_page = Some(now);
+                        cxt.editor.tree.focus = view_id;
+                        commands::media_page_move(cxt, direction == Direction::Forward);
+                        cxt.editor.tree.focus = current_view;
+                    }
+                    return EventResult::Consumed(None);
+                }
 
                 match pos_and_view(cxt.editor, row, column, false) {
                     Some((_, view_id)) => cxt.editor.tree.focus = view_id,
