@@ -298,7 +298,10 @@ fn reload_vcs_diffs(editor: &mut Editor) {
                     helix_loader::workspace_trust::TrustQuery::Git,
                 )
                 .is_trusted();
-            Some((doc.id(), editor.diff_providers.get_diff_base(path, trust_full)))
+            Some((
+                doc.id(),
+                editor.diff_providers.get_diff_base(path, trust_full),
+            ))
         })
         .collect();
 
@@ -368,6 +371,19 @@ pub(super) fn register_hooks(handlers: &Handlers, config: &Config) {
     let handler_ = handler.clone();
     register_hook!(move |event: &mut ConfigDidChange<'_>| {
         handler_.refresh_config(event.new);
+        // The poll loop reschedules itself and stops when polling is turned off
+        // (see `finish_debounce`), and it is only started once below at startup.
+        // Restart it when polling is turned back on at runtime, otherwise the
+        // setting would stay dead until the editor is restarted.
+        let polls = |config: &Config| config.auto_reload.enable && config.auto_reload.poll.enable;
+        if polls(event.new) && !polls(event.old) {
+            send_blocking(
+                &event.editor.handlers.auto_reload,
+                AutoReloadEvent::PollAfter {
+                    interval: event.new.auto_reload.poll.interval,
+                },
+            );
+        }
         Ok(())
     });
     register_hook!(move |event: &mut FileSystemDidChange| {
