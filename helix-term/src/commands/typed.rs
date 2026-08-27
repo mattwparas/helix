@@ -154,6 +154,9 @@ fn media_goto_page_impl(cx: &mut compositor::Context, page: usize) -> anyhow::Re
         .as_mut()
         .ok_or_else(|| anyhow!("not a media document"))?;
     media.goto_page(page)?;
+    // Typed commands report a bad page number straight away rather than
+    // leaving it to the renderer (page counts are unknown without `pdfinfo`).
+    media.ensure_raster()?;
     let status = match media.page_count {
         Some(count) => format!("page {}/{}", page + 1, count),
         None => format!("page {}", page + 1),

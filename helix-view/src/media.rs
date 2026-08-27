@@ -107,6 +107,22 @@ pub fn detect_graphics_mode(config: ImageRenderingConfig) -> GraphicsMode {
     }
 }
 
+/// How many images to leave loaded in the terminal. A rasterized PDF page is
+/// tens of megabytes decoded, and terminals cap their image storage (kitty and
+/// ghostty at 320MB per window) by evicting images themselves — which blanks
+/// out placements that are still on screen. Paging through a document would
+/// otherwise hand the terminal a new image per page, so we free the ones we
+/// have paged away from and let them be retransmitted from the PNG cache.
+const MAX_LOADED_IMAGES: usize = 4;
+
+#[derive(Debug, Clone, Copy)]
+struct Placement {
+    /// (cols, rows) the virtual placement was transmitted with.
+    size: (u16, u16),
+    /// Frame this image was last drawn in.
+    used: u64,
+}
+
 /// Per-editor terminal graphics state: what has been transmitted, and what is
 /// queued for transmission on the next flush.
 #[derive(Debug, Default)]
@@ -116,8 +132,11 @@ pub struct GraphicsState {
     pub window_px: Option<(u16, u16)>,
     /// Escape sequences to write to the terminal before the next draw.
     pending: Vec<String>,
-    /// image id -> (cols, rows) of the virtual placement already transmitted.
-    placements: HashMap<u32, (u16, u16)>,
+    /// image id -> the virtual placement already transmitted for it.
+    placements: HashMap<u32, Placement>,
+    /// Incremented per rendered frame, to tell images drawn in this frame from
+    /// ones left over from earlier pages.
+    frame: u64,
 }
 
 impl GraphicsState {
@@ -127,16 +146,53 @@ impl GraphicsState {
         match self.mode {
             GraphicsMode::None => false,
             GraphicsMode::Kitty => {
-                if self.placements.get(&raster.id) != Some(&(cols, rows)) {
-                    self.pending.push(transmit_escape(raster, cols, rows));
-                    self.placements.insert(raster.id, (cols, rows));
+                let frame = self.frame;
+                match self.placements.get_mut(&raster.id) {
+                    Some(placement) if placement.size == (cols, rows) => placement.used = frame,
+                    slot => {
+                        if slot.is_some() {
+                            self.placements.remove(&raster.id);
+                        }
+                        self.pending.push(transmit_escape(raster, cols, rows));
+                        self.placements.insert(
+                            raster.id,
+                            Placement {
+                                size: (cols, rows),
+                                used: frame,
+                            },
+                        );
+                        self.evict_unused();
+                    }
                 }
                 true
             }
         }
     }
 
+    /// Release images that were not drawn in the current frame, oldest first,
+    /// until at most [`MAX_LOADED_IMAGES`] remain. Images drawn this frame are
+    /// never evicted, so several media splits can stay on screen at once.
+    fn evict_unused(&mut self) {
+        if self.placements.len() <= MAX_LOADED_IMAGES {
+            return;
+        }
+        let frame = self.frame;
+        let mut stale: Vec<(u64, u32)> = self
+            .placements
+            .iter()
+            .filter(|(_, placement)| placement.used < frame)
+            .map(|(id, placement)| (placement.used, *id))
+            .collect();
+        stale.sort_unstable();
+        let excess = self.placements.len() - MAX_LOADED_IMAGES;
+        for (_, id) in stale.into_iter().take(excess) {
+            self.placements.remove(&id);
+            self.pending.push(delete_escape(id));
+        }
+    }
+
     pub fn take_pending(&mut self) -> Vec<String> {
+        self.frame = self.frame.wrapping_add(1);
         std::mem::take(&mut self.pending)
     }
 
@@ -207,6 +263,13 @@ fn transmit_escape(raster: &Raster, cols: u16, rows: u16) -> String {
     )
 }
 
+/// Free an image and all of its placements (`d=I`, uppercase: also frees the
+/// image data). The PNG stays in our on-disk cache, so a page we come back to
+/// is retransmitted without re-rasterizing.
+fn delete_escape(id: u32) -> String {
+    format!("\x1b_Ga=d,d=I,i={id},q=2\x1b\\")
+}
+
 fn base64(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
@@ -253,10 +316,39 @@ pub struct MediaState {
     pub kind: MediaKind,
     source: PathBuf,
     mtime: SystemTime,
-    /// Zero-based page for PDFs; always 0 for images.
+    /// Zero-based page for PDFs; always 0 for images. This is the page the
+    /// document *should* show: paging only moves this counter, and the page is
+    /// rasterized off the main thread afterwards (see
+    /// [`MediaState::take_raster_request`]). Holding a paging key therefore
+    /// runs `pdftoppm` for the page you land on rather than once per keystroke
+    /// for pages that are never displayed.
     pub page: usize,
     pub page_count: Option<usize>,
+    /// The page [`MediaState::raster`] holds.
+    rastered: usize,
+    /// Page a background rasterize is currently running for, if any.
+    pending: Option<usize>,
     pub raster: Raster,
+}
+
+/// A page to rasterize off the main thread. See
+/// [`MediaState::take_raster_request`].
+#[derive(Debug, Clone)]
+pub struct RasterRequest {
+    source: PathBuf,
+    mtime: SystemTime,
+    page: usize,
+}
+
+impl RasterRequest {
+    pub fn page(&self) -> usize {
+        self.page
+    }
+
+    /// Rasterize the page. Blocking: run this on a blocking task.
+    pub fn run(&self) -> Result<Raster> {
+        raster_pdf_page(&self.source, self.mtime, self.page)
+    }
 }
 
 impl MediaState {
@@ -275,12 +367,15 @@ impl MediaState {
             mtime,
             page: 0,
             page_count,
+            rastered: 0,
+            pending: None,
             raster,
         })
     }
 
-    /// Switch to a zero-based page, rasterizing it. Fails (keeping the current
-    /// page) if the page does not exist or rasterization fails.
+    /// Switch to a zero-based page. The page is rasterized lazily, by
+    /// [`MediaState::ensure_raster`] at render time; this only fails when the
+    /// page is known not to exist.
     pub fn goto_page(&mut self, page: usize) -> Result<()> {
         if self.kind != MediaKind::Pdf {
             bail!("not a paginated document");
@@ -290,10 +385,64 @@ impl MediaState {
                 bail!("no page {} (document has {})", page + 1, count);
             }
         }
-        let raster = raster_pdf_page(&self.source, self.mtime, page)?;
-        self.raster = raster;
         self.page = page;
         Ok(())
+    }
+
+    /// Rasterize the current page if [`MediaState::raster`] is stale, blocking
+    /// until it is ready. On failure the document falls back to the page it
+    /// still has a raster for, so a bad page never leaves the view blank.
+    pub fn ensure_raster(&mut self) -> Result<()> {
+        if self.rastered == self.page {
+            return Ok(());
+        }
+        let raster = raster_pdf_page(&self.source, self.mtime, self.page);
+        self.finish_raster(self.page, raster)
+    }
+
+    /// Whether [`MediaState::raster`] still shows an earlier page than
+    /// [`MediaState::page`], i.e. a rasterize is outstanding.
+    pub fn is_rastering(&self) -> bool {
+        self.rastered != self.page
+    }
+
+    /// The page to rasterize in the background, or None when the raster is up
+    /// to date or a rasterize is already running. Only one runs at a time, so
+    /// holding a paging key never queues a `pdftoppm` per keystroke: pages
+    /// that go by before their turn are never rendered at all, and the one you
+    /// land on is picked up on the next frame.
+    pub fn take_raster_request(&mut self) -> Option<RasterRequest> {
+        if self.kind != MediaKind::Pdf || self.rastered == self.page || self.pending.is_some() {
+            return None;
+        }
+        self.pending = Some(self.page);
+        Some(RasterRequest {
+            source: self.source.clone(),
+            mtime: self.mtime,
+            page: self.page,
+        })
+    }
+
+    /// Install the result of a rasterize, or discard it if paging has moved on
+    /// since it started.
+    pub fn finish_raster(&mut self, page: usize, raster: Result<Raster>) -> Result<()> {
+        if self.pending == Some(page) {
+            self.pending = None;
+        }
+        if page != self.page {
+            return Ok(());
+        }
+        match raster {
+            Ok(raster) => {
+                self.raster = raster;
+                self.rastered = page;
+                Ok(())
+            }
+            Err(err) => {
+                self.page = self.rastered;
+                Err(err)
+            }
+        }
     }
 }
 
@@ -458,6 +607,110 @@ mod tests {
         // Degenerate inputs stay in range.
         let (cols, rows) = fit_placement((1, 1), (0, 0), None, false);
         assert!(cols >= 1 && rows >= 1);
+    }
+
+    fn test_raster(id: u32) -> Raster {
+        Raster {
+            png: PathBuf::from("/tmp/page.png"),
+            width: 1000,
+            height: 1000,
+            id,
+        }
+    }
+
+    #[test]
+    fn paging_frees_images_it_has_left_behind() {
+        let mut state = GraphicsState {
+            mode: GraphicsMode::Kitty,
+            ..Default::default()
+        };
+        let pages = MAX_LOADED_IMAGES as u32 + 2;
+        let mut escapes = String::new();
+        // One new image per frame, as paging through a PDF does.
+        for id in 1..=pages {
+            assert!(state.ensure_placement(&test_raster(id), 10, 10));
+            escapes.extend(state.take_pending());
+        }
+        assert!(state.placements.len() <= MAX_LOADED_IMAGES);
+        // The page on screen is still loaded, the first pages were freed.
+        assert!(state.placements.contains_key(&pages));
+        assert!(!state.placements.contains_key(&1));
+        assert!(escapes.contains("a=d,d=I,i=1,"), "no delete for image 1");
+    }
+
+    #[test]
+    fn images_drawn_this_frame_are_kept() {
+        let mut state = GraphicsState {
+            mode: GraphicsMode::Kitty,
+            ..Default::default()
+        };
+        // Many media splits on screen at once: all of them are drawn in the
+        // same frame, so none may be evicted even past the limit.
+        let ids = 1..=(MAX_LOADED_IMAGES as u32 + 2);
+        for id in ids.clone() {
+            state.ensure_placement(&test_raster(id), 10, 10);
+        }
+        assert_eq!(state.placements.len(), ids.count());
+        assert!(!state.take_pending().iter().any(|e| e.contains("a=d")));
+    }
+
+    fn pdf_state(page_count: Option<usize>) -> MediaState {
+        MediaState {
+            kind: MediaKind::Pdf,
+            source: PathBuf::from("/nonexistent.pdf"),
+            mtime: SystemTime::UNIX_EPOCH,
+            page: 0,
+            page_count,
+            rastered: 0,
+            pending: None,
+            raster: test_raster(1),
+        }
+    }
+
+    #[test]
+    fn paging_rasterizes_only_the_page_landed_on() {
+        let mut state = pdf_state(Some(10));
+        state.goto_page(1).unwrap();
+        let request = state.take_raster_request().expect("page 2 rasterizes");
+        assert_eq!(request.page(), 1);
+        // Holding `j`: more pages go by while that rasterize is still running.
+        for page in 2..=5 {
+            state.goto_page(page).unwrap();
+        }
+        assert!(
+            state.take_raster_request().is_none(),
+            "only one rasterize runs at a time"
+        );
+        // Its result is for a page long gone, so it is dropped, not displayed.
+        state.finish_raster(1, Ok(test_raster(2))).unwrap();
+        assert_eq!(state.raster.id, 1);
+        assert!(state.is_rastering());
+        // The next frame picks up the page actually landed on.
+        let request = state.take_raster_request().expect("page 6 rasterizes");
+        assert_eq!(request.page(), 5);
+        state.finish_raster(5, Ok(test_raster(2))).unwrap();
+        assert_eq!(state.raster.id, 2);
+        assert!(!state.is_rastering());
+        assert!(state.take_raster_request().is_none());
+    }
+
+    #[test]
+    fn a_page_that_cannot_be_rendered_falls_back() {
+        // Without `pdfinfo` there is no page count to range check against, so
+        // paging past the end only fails once the rasterize comes back.
+        let mut state = pdf_state(None);
+        state.goto_page(4).unwrap();
+        let request = state.take_raster_request().unwrap();
+        assert!(state
+            .finish_raster(request.page(), Err(anyhow!("no page 5")))
+            .is_err());
+        assert_eq!(state.page, 0, "stays on the page it can still show");
+        assert!(!state.is_rastering());
+
+        // With a page count it is rejected up front instead.
+        let mut state = pdf_state(Some(3));
+        assert!(state.goto_page(3).is_err());
+        assert_eq!(state.page, 0);
     }
 
     #[test]

@@ -278,6 +278,28 @@ impl EditorView {
         statusline::render(&mut context, statusline_area, surface);
     }
 
+    /// Rasterize a PDF page on a blocking task and hand the result back to the
+    /// document it belongs to. A result for a page that has since been paged
+    /// away from is discarded by `finish_raster`.
+    fn spawn_raster(doc_id: DocumentId, request: helix_view::media::RasterRequest) {
+        tokio::task::spawn_blocking(move || {
+            let page = request.page();
+            let raster = request.run();
+            crate::job::dispatch_blocking(move |editor, _compositor| {
+                let Some(media) = editor
+                    .documents
+                    .get_mut(&doc_id)
+                    .and_then(|doc| doc.media.as_mut())
+                else {
+                    return;
+                };
+                if let Err(err) = media.finish_raster(page, raster) {
+                    editor.set_error(err.to_string());
+                }
+            });
+        });
+    }
+
     /// Render a media document (image/PDF) as a kitty unicode-placeholder
     /// placement, or as an informational fallback when graphics are
     /// unavailable. See `helix_view::media`.
@@ -291,6 +313,25 @@ impl EditorView {
         use helix_view::media;
 
         let editor = &mut *cx.editor;
+        let graphical = editor.graphics.mode != media::GraphicsMode::None;
+
+        // Paging only moves a counter; the page it landed on is rasterized off
+        // the main thread, one page at a time, so holding a paging key neither
+        // blocks the editor nor renders pages that go by on the way. The
+        // previous page stays on screen until the new one is ready.
+        if graphical {
+            let request = editor
+                .documents
+                .get_mut(&doc_id)
+                .expect("media view referenced missing doc")
+                .media
+                .as_mut()
+                .and_then(media::MediaState::take_raster_request);
+            if let Some(request) = request {
+                Self::spawn_raster(doc_id, request);
+            }
+        }
+
         let theme = &editor.theme;
         let text_style = theme.get("ui.text");
         let comment_style = theme.get("comment");
@@ -310,13 +351,22 @@ impl EditorView {
         let raster = media.raster.clone();
         let kind = media.kind;
         let (page, page_count) = (media.page, media.page_count);
+        // Nothing is being rasterized when there is nothing to display it.
+        let rastering = graphical && media.is_rastering();
         let display_name = doc.display_name().into_owned();
 
         let caption = match kind {
-            media::MediaKind::Pdf => match page_count {
-                Some(count) => format!("page {}/{}", page + 1, count),
-                None => format!("page {}", page + 1),
-            },
+            media::MediaKind::Pdf => {
+                let mut caption = match page_count {
+                    Some(count) => format!("page {}/{}", page + 1, count),
+                    None => format!("page {}", page + 1),
+                };
+                // The image below the caption is still the previous page.
+                if rastering {
+                    caption.push_str(" \u{2026}");
+                }
+                caption
+            }
             media::MediaKind::Image => format!("{}\u{00d7}{}", raster.width, raster.height),
         };
 
