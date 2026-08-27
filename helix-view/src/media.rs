@@ -22,6 +22,7 @@ pub const PLACEHOLDER: char = '\u{10EEEE}';
 
 /// Row/column diacritics from the kitty spec (`gen/rowcolumn-diacritics.txt`,
 /// Unicode ccc=230 combining marks). Index n encodes row/column n+1.
+#[rustfmt::skip]
 pub const ROW_COLUMN_DIACRITICS: [char; 297] = [
     '\u{0305}', '\u{030D}', '\u{030E}', '\u{0310}', '\u{0312}', '\u{033D}', '\u{033E}', '\u{033F}',
     '\u{0346}', '\u{034A}', '\u{034B}', '\u{034C}', '\u{0350}', '\u{0351}', '\u{0352}', '\u{0357}',
@@ -96,7 +97,9 @@ pub fn detect_graphics_mode(config: ImageRenderingConfig) -> GraphicsMode {
             // (WezTerm implements the protocol but not placeholders, so it is
             // deliberately absent; use `image-rendering = "kitty"` to force.)
             let known = ["kitty", "ghostty"];
-            if known.iter().any(|t| term.contains(t) || term_program.contains(t))
+            if known
+                .iter()
+                .any(|t| term.contains(t) || term_program.contains(t))
                 || std::env::var_os("KITTY_WINDOW_ID").is_some()
             {
                 GraphicsMode::Kitty
@@ -230,10 +233,7 @@ pub fn fit_placement(
     };
     let max_cells = ROW_COLUMN_DIACRITICS.len() as u16;
     let avail = (avail.0.min(max_cells), avail.1.min(max_cells));
-    let mut scale = f32::min(
-        avail.0 as f32 * cw / iw,
-        avail.1 as f32 * ch / ih,
-    );
+    let mut scale = f32::min(avail.0 as f32 * cw / iw, avail.1 as f32 * ch / ih);
     if cap_natural {
         scale = scale.min(1.0);
     }
@@ -274,12 +274,24 @@ fn base64(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
         out.push(ALPHABET[(n >> 18) as usize & 63] as char);
         out.push(ALPHABET[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { ALPHABET[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { ALPHABET[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -527,7 +539,12 @@ fn image_to_png(source: &Path, mtime: SystemTime) -> Result<Raster> {
         cache
     };
     let (width, height) = png_dimensions(&png)?;
-    Ok(Raster { png, width, height, id })
+    Ok(Raster {
+        png,
+        width,
+        height,
+        id,
+    })
 }
 
 fn raster_pdf_page(source: &Path, mtime: SystemTime, page: usize) -> Result<Raster> {
@@ -561,7 +578,12 @@ fn raster_pdf_page(source: &Path, mtime: SystemTime, page: usize) -> Result<Rast
         }
     }
     let (width, height) = png_dimensions(&cache)?;
-    Ok(Raster { png: cache, width, height, id })
+    Ok(Raster {
+        png: cache,
+        width,
+        height,
+        id,
+    })
 }
 
 fn pdf_page_count(source: &Path) -> Option<usize> {
