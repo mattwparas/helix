@@ -465,10 +465,13 @@ impl WatchFilter {
     ) -> WatchFilter {
         let filesentry_ignores = IgnoreFiles::filesentry_ignores(workspace);
         let (global_ignores, workspace_ignore) = IgnoreFiles::shared_ignores(workspace, config);
-        let ignore_files = roots
+        let mut ignore_files: Vec<IgnoreFiles> = roots
             .chain([workspace])
             .map(|root| IgnoreFiles::new(workspace_ignore.clone(), config, root, &global_ignores))
             .collect();
+        // `roots` is sorted but `workspace` is appended after it, so sort the
+        // whole set: `ignore_files_for` binary-searches it by root.
+        ignore_files.sort_by(|a, b| a.root.cmp(&b.root));
         WatchFilter {
             filesentry_ignores,
             ignore_files,
@@ -476,6 +479,22 @@ impl WatchFilter {
             hidden: config.hidden,
             watch_vcs: config.watch_vcs,
         }
+    }
+
+    /// The ignore rules of the innermost watch root containing `path`, together
+    /// with that root. `ignore_files` is sorted by root, and a root that is a
+    /// prefix of `path` never sorts after it, so only the entries before the
+    /// partition point can contain `path`; the last such entry is the innermost.
+    /// Returns `None` when `path` lies under no watch root.
+    fn ignore_files_for(&self, path: &Path) -> Option<(&Path, &[Arc<Gitignore>])> {
+        let i = self
+            .ignore_files
+            .partition_point(|files| files.root.as_path() <= path);
+        let files = self.ignore_files[..i]
+            .iter()
+            .rev()
+            .find(|files| path.starts_with(&files.root))?;
+        Some((&files.root, &files.ignores))
     }
 
     fn ignore_path_impl(
@@ -508,15 +527,9 @@ impl WatchFilter {
 
 impl filesentry::Filter for WatchFilter {
     fn ignore_path(&self, path: &Path, is_dir: Option<bool>) -> bool {
-        let i = self
-            .ignore_files
-            .partition_point(|ignore_files| path < ignore_files.root);
         let (root, ignore_files) = self
-            .ignore_files
-            .get(i)
-            .map_or((Path::new(""), &self.global_ignores), |files| {
-                (&files.root, &files.ignores)
-            });
+            .ignore_files_for(path)
+            .unwrap_or((Path::new(""), &self.global_ignores));
         if path == root {
             return false;
         }
@@ -524,15 +537,9 @@ impl filesentry::Filter for WatchFilter {
     }
 
     fn ignore_path_rec(&self, mut path: &Path, mut is_dir: Option<bool>) -> bool {
-        let i = self
-            .ignore_files
-            .partition_point(|ignore_files| path < ignore_files.root);
         let (root, ignore_files) = self
-            .ignore_files
-            .get(i)
-            .map_or((Path::new(""), &self.global_ignores), |files| {
-                (&files.root, &files.ignores)
-            });
+            .ignore_files_for(path)
+            .unwrap_or((Path::new(""), &self.global_ignores));
         loop {
             if path == root {
                 return false;
@@ -598,9 +605,73 @@ fn is_vcs_ignore(path: &Path, watch_vcs: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use crate::file_watcher::{is_hardcoded_whitelist, is_hidden, is_vcs_ignore};
+    use ignore::gitignore::Gitignore;
+
+    use crate::file_watcher::{
+        is_hardcoded_whitelist, is_hidden, is_vcs_ignore, IgnoreFiles, WatchFilter,
+    };
+
+    fn filter(roots: &[&str]) -> WatchFilter {
+        let mut ignore_files: Vec<IgnoreFiles> = roots
+            .iter()
+            .map(|root| IgnoreFiles {
+                root: PathBuf::from(root),
+                ignores: Vec::new(),
+            })
+            .collect();
+        ignore_files.sort_by(|a, b| a.root.cmp(&b.root));
+        WatchFilter {
+            filesentry_ignores: Gitignore::empty(),
+            ignore_files,
+            global_ignores: Vec::new(),
+            hidden: true,
+            watch_vcs: true,
+        }
+    }
+
+    /// A path must resolve to the watch root that actually contains it. With
+    /// more than one root -- the workspace plus roots added for LSP watchers --
+    /// an inverted lookup silently applied a sibling root's ignore rules, or
+    /// none at all.
+    #[test]
+    fn ignore_files_resolve_to_the_containing_root() {
+        let filter = filter(&["/a", "/b", "/workspace"]);
+        for (path, expected) in [
+            ("/b/foo.rs", Some("/b")),
+            ("/workspace/src/main.rs", Some("/workspace")),
+            ("/a/x.rs", Some("/a")),
+            ("/a", Some("/a")),
+            ("/elsewhere/x.rs", None),
+        ] {
+            let got = filter
+                .ignore_files_for(Path::new(path))
+                .map(|(root, _)| root);
+            assert_eq!(got, expected.map(Path::new), "path {path}");
+        }
+    }
+
+    /// Nested roots resolve to the innermost one, and a sibling sorting between
+    /// them must not shadow the outer root.
+    #[test]
+    fn ignore_files_prefer_the_innermost_root() {
+        let filter = filter(&["/a", "/a/b"]);
+        assert_eq!(
+            filter
+                .ignore_files_for(Path::new("/a/b/c.rs"))
+                .map(|(root, _)| root),
+            Some(Path::new("/a/b"))
+        );
+        // `/a/z.rs` sorts after `/a/b`, which is not a prefix of it: it still
+        // belongs to `/a`.
+        assert_eq!(
+            filter
+                .ignore_files_for(Path::new("/a/z.rs"))
+                .map(|(root, _)| root),
+            Some(Path::new("/a"))
+        );
+    }
 
     #[test]
     fn test_vcs_ignore() {
