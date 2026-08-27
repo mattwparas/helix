@@ -818,10 +818,18 @@ fn move_char_right(cx: &mut Context) {
 }
 
 fn move_line_up(cx: &mut Context) {
+    // `gk`: pages backward on media documents, like `k` (see media_page_move).
+    if media_page_move(cx, false) {
+        return;
+    }
     move_impl(cx, move_vertically, Direction::Backward, Movement::Move)
 }
 
 fn move_line_down(cx: &mut Context) {
+    // `gj`: pages forward on media documents, like `j` (see media_page_move).
+    if media_page_move(cx, true) {
+        return;
+    }
     move_impl(cx, move_vertically, Direction::Forward, Movement::Move)
 }
 
