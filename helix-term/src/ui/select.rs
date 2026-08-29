@@ -13,9 +13,12 @@ use super::{menu::Item, Menu, PromptEvent, Text};
 pub struct Select<T: Item> {
     message: Text,
     options: Menu<T>,
+    id: &'static str,
 }
 
 impl<T: Item> Select<T> {
+    pub const ID: &'static str = "select";
+
     pub fn new<M, I, F>(message: M, options: I, data: T::Data, callback: F) -> Self
     where
         M: Into<Cow<'static, str>>,
@@ -31,14 +34,22 @@ impl<T: Item> Select<T> {
             let option = &option.unwrap();
             callback(editor, option, event)
         })
-        .auto_close(true);
+        .auto_close(true)
+        .with_layer_id(Self::ID);
         // Select the first option by default.
         menu.move_down();
 
         Self {
             message,
             options: menu,
+            id: Self::ID,
         }
+    }
+
+    pub fn with_id(mut self, id: &'static str) -> Self {
+        self.id = id;
+        self.options.set_layer_id(id);
+        self
     }
 }
 
@@ -98,5 +109,9 @@ impl<T: Item> Component for Select<T> {
         // Options menu
         let menu_area = area.clip_top(message_height + 2);
         self.options.render(menu_area, surface, cx);
+    }
+
+    fn id(&self) -> Option<&'static str> {
+        Some(self.id)
     }
 }

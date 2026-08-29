@@ -595,6 +595,8 @@ impl ui::menu::Item for CodeActionItem {
     }
 }
 
+const CODE_ACTION_ID: &str = "code-action";
+
 pub fn code_action(cx: &mut Context) {
     let (view, doc) = current!(cx.editor);
 
@@ -655,14 +657,15 @@ pub fn code_action(cx: &mut Context) {
                 }
                 // Always present on validate.
                 action.unwrap().execute(editor);
-            });
+            })
+            .with_layer_id(CODE_ACTION_ID);
             picker.move_down(); // pre-select the first item
 
-            let popup = Popup::new("code-action", picker)
+            let popup = Popup::new(CODE_ACTION_ID, picker)
                 .with_scrollbar(false)
                 .auto_close(true);
 
-            compositor.replace_or_push("code-action", popup);
+            compositor.replace_or_push(CODE_ACTION_ID, popup);
         };
 
         Ok(Callback::EditorCompositor(Box::new(call)))

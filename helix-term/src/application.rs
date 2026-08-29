@@ -69,6 +69,8 @@ type TerminalEvent = crossterm::event::Event;
 
 type Terminal = tui::terminal::Terminal<TerminalBackend>;
 
+const LSP_SHOW_MESSAGE_REQUEST_ID: &str = "lsp-show-message-request";
+
 pub struct Application {
     compositor: Compositor,
     terminal: Terminal,
@@ -1259,9 +1261,10 @@ impl Application {
                                         }
                                     }
                                 },
-                            );
+                            )
+                            .with_id(LSP_SHOW_MESSAGE_REQUEST_ID);
                             self.compositor
-                                .replace_or_push("lsp-show-message-request", select);
+                                .replace_or_push(LSP_SHOW_MESSAGE_REQUEST_ID, select);
                             // Avoid sending a reply. The `Select` callback above sends the reply.
                             return;
                         } else {

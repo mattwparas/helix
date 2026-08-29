@@ -3635,7 +3635,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "steel-core"
 version = "0.8.3"
-source = "git+https://github.com/mattwparas/steel.git#1b785a4e9d24e3553b242522b35d4498dae72816"
+source = "git+https://github.com/mattwparas/steel.git#118fb9f9257dd518db92c093e230c3392b8fd520"
 dependencies = [
  "abi_stable",
  "anyhow",
@@ -3694,7 +3694,7 @@ dependencies = [
 [[package]]
 name = "steel-derive"
 version = "0.8.3"
-source = "git+https://github.com/mattwparas/steel.git#1b785a4e9d24e3553b242522b35d4498dae72816"
+source = "git+https://github.com/mattwparas/steel.git#118fb9f9257dd518db92c093e230c3392b8fd520"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3704,7 +3704,7 @@ dependencies = [
 [[package]]
 name = "steel-doc"
 version = "0.8.3"
-source = "git+https://github.com/mattwparas/steel.git#1b785a4e9d24e3553b242522b35d4498dae72816"
+source = "git+https://github.com/mattwparas/steel.git#118fb9f9257dd518db92c093e230c3392b8fd520"
 dependencies = [
  "steel-core",
 ]
@@ -3712,7 +3712,7 @@ dependencies = [
 [[package]]
 name = "steel-gen"
 version = "0.8.3"
-source = "git+https://github.com/mattwparas/steel.git#1b785a4e9d24e3553b242522b35d4498dae72816"
+source = "git+https://github.com/mattwparas/steel.git#118fb9f9257dd518db92c093e230c3392b8fd520"
 dependencies = [
  "codegen",
  "serde",
@@ -3736,7 +3736,7 @@ dependencies = [
 [[package]]
 name = "steel-parser"
 version = "0.8.3"
-source = "git+https://github.com/mattwparas/steel.git#1b785a4e9d24e3553b242522b35d4498dae72816"
+source = "git+https://github.com/mattwparas/steel.git#118fb9f9257dd518db92c093e230c3392b8fd520"
 dependencies = [
  "compact_str",
  "dashmap",
@@ -3757,7 +3757,7 @@ dependencies = [
 [[package]]
 name = "steel-quickscope"
 version = "0.3.3"
-source = "git+https://github.com/mattwparas/steel.git#1b785a4e9d24e3553b242522b35d4498dae72816"
+source = "git+https://github.com/mattwparas/steel.git#118fb9f9257dd518db92c093e230c3392b8fd520"
 dependencies = [
  "indexmap 2.14.0",
  "rustc-hash",
@@ -3767,7 +3767,7 @@ dependencies = [
 [[package]]
 name = "steel-rc"
 version = "0.8.3"
-source = "git+https://github.com/mattwparas/steel.git#1b785a4e9d24e3553b242522b35d4498dae72816"
+source = "git+https://github.com/mattwparas/steel.git#118fb9f9257dd518db92c093e230c3392b8fd520"
 dependencies = [
  "dashmap",
  "parking_lot",

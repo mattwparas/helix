@@ -36,6 +36,7 @@ pub struct Menu<T: Item> {
     viewport: (u16, u16),
     recalculate: bool,
     auto_close: bool,
+    layer_id: Option<&'static str>,
 }
 
 impl<T: Item> Menu<T> {
@@ -61,7 +62,17 @@ impl<T: Item> Menu<T> {
             viewport: (0, 0),
             recalculate: true,
             auto_close: false,
+            layer_id: None,
         }
+    }
+
+    pub fn with_layer_id(mut self, layer_id: &'static str) -> Self {
+        self.set_layer_id(layer_id);
+        self
+    }
+
+    pub fn set_layer_id(&mut self, layer_id: &'static str) {
+        self.layer_id = Some(layer_id);
     }
 
     pub fn reset_cursor(&mut self) {
@@ -241,11 +252,18 @@ impl<T: Item + 'static> Component for Menu<T> {
             _ => return EventResult::Ignored(None),
         };
 
-        let id = self.id().unwrap_or_else(|| self.type_name());
+        let layer_id = self.layer_id;
 
-        let close_fn: Option<Callback> = Some(Box::new(|compositor: &mut Compositor, _| {
+        let close_fn: Option<Callback> = Some(Box::new(move |compositor: &mut Compositor, _| {
             // remove the layer
-            compositor.remove(id);
+            match layer_id {
+                Some(id) => {
+                    compositor.remove(id);
+                }
+                None => {
+                    compositor.pop();
+                }
+            }
         }));
 
         // Ignore tab key when supertab is turned on in order not to interfere

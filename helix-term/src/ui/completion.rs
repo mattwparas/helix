@@ -290,6 +290,8 @@ impl Completion {
             }
         });
 
+        let menu = menu.with_layer_id(Self::ID);
+
         let popup = Popup::new(Self::ID, menu)
             .with_scrollbar(false)
             .ignore_escape_key(true);
