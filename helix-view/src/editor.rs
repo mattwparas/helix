@@ -680,13 +680,45 @@ pub struct SearchConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
 pub struct StatusLineConfig {
+    #[serde(serialize_with = "serialize_status_line_elements")]
     pub left: Vec<StatusLineElement>,
+    #[serde(serialize_with = "serialize_status_line_elements")]
     pub center: Vec<StatusLineElement>,
+    #[serde(serialize_with = "serialize_status_line_elements")]
     pub right: Vec<StatusLineElement>,
     pub separator: String,
     pub mode: ModeConfig,
     pub diagnostics: Vec<Severity>,
     pub workspace_diagnostics: Vec<Severity>,
+}
+
+// `StatusLineElement::Custom` can't be serialized (it's `#[serde(skip)]`),
+// which would otherwise make `get_option_value`/`dynamic_set_option` in
+// `helix-term/src/commands/engine/steel/mod.rs` panic - they call
+// `serde_json::json!`/`to_value` on the *entire* live config to round-trip
+// option changes through JSON, and that panics on an unserializable value
+// reachable from it. Filter `Custom` out here, before serde ever sees it, so
+// a live custom status element quietly drops out of that round trip instead
+// of blowing it up.
+fn serialize_status_line_elements<S>(
+    elements: &[StatusLineElement],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    #[cfg(feature = "steel")]
+    {
+        elements
+            .iter()
+            .filter(|element| !matches!(element, StatusLineElement::Custom(_)))
+            .collect::<Vec<_>>()
+            .serialize(serializer)
+    }
+    #[cfg(not(feature = "steel"))]
+    {
+        elements.serialize(serializer)
+    }
 }
 
 impl Default for StatusLineConfig {
