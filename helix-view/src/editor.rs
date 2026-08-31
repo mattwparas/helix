@@ -437,8 +437,6 @@ pub struct Config {
     /// Whether or not to use steel for configuration. Defaults to `true`. If set to `false`,
     /// the steel engine will not be initialized.
     pub enable_steel: bool,
-    /// Whether to implicitly trust every workspace or not
-    pub insecure: bool,
     /// Workspace-trust configuration.
     pub workspace_trust: WorkspaceTrustConfig,
 }
@@ -1258,7 +1256,6 @@ impl Default for Config {
             enable_steel: true,
             #[cfg(not(feature = "steel"))]
             enable_steel: false,
-            insecure: false,
             workspace_trust: WorkspaceTrustConfig::default(),
         }
     }
