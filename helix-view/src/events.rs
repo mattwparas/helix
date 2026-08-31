@@ -35,6 +35,15 @@ events! {
         server_id: LanguageServerId
     }
 
+    LspProgressUpdate {
+        server_name: String,
+        token: String,
+        kind: String,
+        title: Option<String>,
+        message: Option<String>,
+        percentage: Option<u32>
+    }
+
     // NOTE: this event is simple for now and is expected to change as the config system evolves.
     // Ideally it would say what changed.
     ConfigDidChange<'a> {
