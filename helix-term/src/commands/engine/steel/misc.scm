@@ -332,3 +332,83 @@
 ;; pattern : string?
 ;; input-list : (list? string?)
 (define fuzzy-match helix.fuzzy-match)
+
+;;@doc
+;; Register a hook that fires on every LSP WorkDoneProgress begin/report/end notification.
+;; The callback receives six arguments:
+;;   server-name : string  — the language server name
+;;   token      : string  — the progress token (number or string from the server)
+;;   kind       : string  — "begin" | "report" | "end"
+;;   title      : string? — task title (only present on "begin")
+;;   message    : string? — optional human-readable message
+;;   percentage : integer? — optional 0-100 completion percentage
+;;
+;; Example:
+;; ```scheme
+;; (register-hook! 'lsp-progress
+;;   (lambda (server-id token kind title message percentage)
+;;     (when (equal? kind "begin")
+;;       (display (string-append "LSP: " (or title token) "\n")))))
+;; ```
+
+(provide steel-mode)
+;;@doc
+;;Returns the active Steel mode name, or #false if no Steel mode is active.
+(define steel-mode helix.steel-mode)
+
+(provide set-steel-mode!)
+;;@doc
+;;Set the active Steel mode by name. The name is shown in the statusline.
+;;Use register-steel-mode-keymap! to bind keys for the mode.
+(define set-steel-mode! helix.set-steel-mode!)
+
+(provide unset-steel-mode!)
+;;@doc
+;;Clear the active Steel mode.
+(define unset-steel-mode! helix.unset-steel-mode!)
+
+(provide register-steel-mode-keymap!)
+;;@doc
+;;Register a keymap for a named Steel mode. The keymap takes priority over
+;;the default helix keybindings when that mode is active.
+;;
+;;```scheme
+;;(register-steel-mode-keymap! name keymap)
+;;```
+;;
+;;name : string?
+;;keymap : keymap?
+(define (register-steel-mode-keymap! name keymap)
+  (helix.register-steel-mode-keymap! name (value->jsexpr-string keymap)))
+
+(provide selection-char-ranges)
+;;@doc
+;;Returns a list of (start . end) char-index pairs for every range in the current selection.
+(define selection-char-ranges helix.selection-char-ranges)
+
+(provide set-document-highlights!)
+;;@doc
+;;Set script-defined highlights for a namespace.
+;;
+;;```scheme
+;;(set-document-highlights! namespace ranges scope)
+;;```
+;;
+;;namespace : string? — unique key for this highlight group (e.g. "yank")
+;;ranges    : (listof (cons int? int?)) — list of (start . end) char-index pairs
+;;scope     : string? — theme scope to use (e.g. "ui.selection", "ui.highlight")
+(define set-document-highlights! helix.set-document-highlights!)
+
+(provide clear-document-highlights!)
+;;@doc
+;;Clear script highlights for the given namespace.
+;;
+;;```scheme
+;;(clear-document-highlights! namespace)
+;;```
+(define clear-document-highlights! helix.clear-document-highlights!)
+
+(provide clear-all-document-highlights!)
+;;@doc
+;;Clear all script highlights on the current document.
+(define clear-all-document-highlights! helix.clear-all-document-highlights!)

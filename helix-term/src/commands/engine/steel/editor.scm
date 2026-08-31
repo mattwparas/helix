@@ -23,6 +23,7 @@
 ;; * 'document-focus-lost
 ;; * 'selection-did-change
 ;; * 'document-opened
+;; * 'document-will-save
 ;; * 'document-saved
 ;; * 'document-changed
 ;; * 'document-closed
@@ -87,6 +88,28 @@
 ;; ## document-opened
 ;;
 ;; Expects a function with one argument to accept the doc id of the document that was just opened.
+;;
+;; ## document-will-save
+;;
+;; Fired synchronously, before a `:w`-family command writes the document to
+;; disk - unlike every other hook, which runs deferred and can't affect
+;; anything the caller does next. Expects a function of two arguments, the
+;; doc id and the resolved save path (or `#false` if none could be
+;; resolved). If the callback returns `#true`, the save is considered fully
+;; handled and the built-in write is skipped for this invocation; any other
+;; return value lets the write proceed normally. This is the primitive for a
+;; plugin-owned buffer (a directory listing, a diff view, ...) that wants
+;; `:w` to run its own logic instead of writing the buffer's literal text to
+;; `path` - the callback is responsible for whatever "saved" should mean for
+;; that buffer, including clearing its modified state if desired.
+;;
+;; ```scheme
+;; (register-hook 'document-will-save
+;;                 (lambda (doc-id path)
+;;                   (if (my-plugin-buffer? doc-id)
+;;                       (begin (my-plugin-apply! doc-id) #true)
+;;                       #false)))
+;; ```
 ;;
 ;; ## document-saved
 ;;
@@ -268,6 +291,28 @@
 ;;Set the name of a scratch buffer.
 (define set-scratch-buffer-name! helix.set-scratch-buffer-name!)
 
+(provide set-bufferline-name!)
+;;@doc
+;;Set the short bufferline-tab label for a scratch buffer, independent of
+;;set-scratch-buffer-name! (which is shown in the statusline and can be
+;;long, e.g. a full directory path).
+(define set-bufferline-name! helix.set-bufferline-name!)
+
+(provide document-set-bufferline-name!)
+;;@doc
+;;Same as `set-bufferline-name!`, but by doc-id rather than the current
+;;buffer — needed right after `term-buffer-spawn!`/`term-buffer-spawn-with-shell!`
+;;(see their docs in `helix/static.scm`), since the buffer they return
+;;isn't current yet.
+;;
+;;```scheme
+;;(document-set-bufferline-name! doc-id name) -> void?
+;;
+;;doc-id : doc-id?
+;;name : string?
+;;```
+(define document-set-bufferline-name! helix.document-set-bufferline-name!)
+
 (provide set-buffer-uri!)
 ;;@doc
 ;;Set the URI of the buffer
@@ -322,6 +367,11 @@
 ;;@doc
 ;;Set the editor clipping at the top.
 (define set-editor-clip-top! helix.set-editor-clip-top!)
+
+(provide set-editor-terminal-has-focus!)
+;;@doc
+;;When true, suppresses helix view cursor rendering so only the PTY cursor is visible.
+(define set-editor-terminal-has-focus! helix.set-editor-terminal-has-focus!)
 
 (provide set-editor-clip-right!)
 ;;@doc

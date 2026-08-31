@@ -1362,7 +1362,15 @@ pub struct Editor {
 
     pub editor_clipping: ClippingConfiguration,
 
+    /// When true, a Steel terminal component has focus; helix views render without
+    /// a focused-cursor highlight so only the PTY cursor is visible.
+    pub steel_terminal_has_focus: bool,
+
     pub workspace_trust: WorkspaceTrust,
+
+    /// Active Steel-defined mode name, shown in the statusline instead of the
+    /// normal mode label. `None` means no Steel mode is active.
+    pub steel_mode: Option<String>,
 }
 
 #[derive(Default)]
@@ -1496,8 +1504,10 @@ impl Editor {
             mouse_down_range: None,
             cursor_cache: CursorCache::default(),
             editor_clipping: ClippingConfiguration::default(),
+            steel_terminal_has_focus: false,
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
             workspace_trust,
+            steel_mode: None,
         }
     }
 
@@ -1986,7 +1996,10 @@ impl Editor {
                 // of `self.tree`, which is mutably borrowed when `view_mut` is called.
                 let remove_empty_scratch = !doc.is_modified()
                     // If the buffer has no path and is not modified, it is an empty scratch buffer.
+                    // A terminal buffer also has no path, but isn't empty or disposable -
+                    // see `Document::is_terminal_buffer`.
                     && doc.path().is_none()
+                    && !doc.is_terminal_buffer
                     // If the buffer we are changing to is not this buffer
                     && id != doc.id
                     // Ensure the buffer is not displayed in any other splits.
@@ -2076,7 +2089,13 @@ impl Editor {
     }
 
     /// Generate an id for a new document and register it.
-    fn new_document(&mut self, mut doc: Document) -> DocumentId {
+    /// Registers `doc` and returns its new id, without switching any view to
+    /// show it. Used by terminal-buffer-mode to spawn a pty attached to a
+    /// document that isn't visible yet, so a slow-to-start child process
+    /// (shell fork/exec + its own startup) doesn't flash an empty buffer
+    /// before there's real output to reveal — see `helix-term`'s
+    /// `term_pty::PtySession`.
+    pub fn new_document(&mut self, mut doc: Document) -> DocumentId {
         let id = self.next_document_id;
         // Safety: adding 1 from 1 is fine, practically impossible to reach usize max
         self.next_document_id =
@@ -2332,11 +2351,17 @@ impl Editor {
         let prev_id = std::mem::replace(&mut self.tree.focus, view_id);
         doc_mut!(self).mark_as_focused();
 
-        let focus_lost = self.tree.get(prev_id).doc;
-        dispatch(DocumentFocusLost {
-            editor: self,
-            doc: focus_lost,
-        });
+        // `prev_id` can already be gone from the tree here - e.g. if it was
+        // an empty scratch view removed as a side effect of the work above
+        // (enter_normal_mode/ensure_cursor_in_view/the sync_changes loop).
+        // Nothing meaningful lost focus in that case, so just skip the
+        // dispatch rather than unwrap a stale ViewId.
+        if let Some(focus_lost) = self.tree.try_get(prev_id).map(|view| view.doc) {
+            dispatch(DocumentFocusLost {
+                editor: self,
+                doc: focus_lost,
+            });
+        }
     }
 
     pub fn focus_next(&mut self) {

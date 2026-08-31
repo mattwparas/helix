@@ -1,6 +1,8 @@
 use std::io::BufReader;
 use std::ops::{self, Deref};
+use std::path::PathBuf;
 
+use crate::events::DocumentWillSave;
 use crate::job::Job;
 
 use super::*;
@@ -383,6 +385,36 @@ fn write_impl(
     path: Option<&str>,
     options: WriteOptions,
 ) -> anyhow::Result<()> {
+    let doc_id = doc!(cx.editor).id();
+    let resolved_path = path
+        .map(PathBuf::from)
+        .or_else(|| doc!(cx.editor).path().map(|p| p.to_path_buf()));
+
+    let mut cancel = false;
+    // `DocumentWillSave` hooks run through the same dispatch machinery as
+    // command hooks (`PostCommand`, etc.), which expects `commands::Context`
+    // rather than the `compositor::Context` typed commands are given. Build a
+    // throwaway one over the same `editor`/`jobs` borrows; any compositor
+    // callback a hook queues (e.g. pushing a popup) is dropped, since there's
+    // nowhere to hand it off to here.
+    let mut command_cx = Context {
+        register: None,
+        count: None,
+        editor: cx.editor,
+        callback: Vec::new(),
+        on_next_key_callback: None,
+        jobs: cx.jobs,
+    };
+    helix_event::dispatch(DocumentWillSave {
+        doc: doc_id,
+        path: resolved_path.as_deref(),
+        cancel: &mut cancel,
+        cx: &mut command_cx,
+    });
+    if cancel {
+        return Ok(());
+    }
+
     let config = cx.editor.config();
     let (view, doc) = current!(cx.editor);
     let doc_id = doc.id();
@@ -609,6 +641,36 @@ fn new_file(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> an
     }
 
     cx.editor.new_file(Action::Replace);
+
+    Ok(())
+}
+
+fn terminal_new(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let (view, doc) = current!(cx.editor);
+    let view_id = view.id;
+    let area = view.inner_area(doc);
+    // Reserve one column: a pty line that exactly fills `cols` (common for
+    // box-drawn full-width TUI panels) sits right on Helix's own soft-wrap
+    // boundary and gets wrapped a second time on top of vt100's grid.
+    let (rows, cols) = (area.height.max(1), area.width.saturating_sub(1).max(1));
+
+    // Created but not switched to yet: term_pty::PtySession reveals it once
+    // the child process has actually produced something to show, instead of
+    // flashing an empty buffer during its own shell-fork/exec/init latency.
+    let mut new_doc = Document::default(cx.editor.config.clone(), cx.editor.syn_loader.clone());
+    new_doc.is_terminal_buffer = true;
+    let doc_id = cx.editor.new_document(new_doc);
+    cx.editor.document_mut(doc_id).unwrap().bufferline_name = Some("term".to_string());
+
+    crate::term_pty::PtySession::spawn(doc_id, view_id, rows, cols, None, None)?;
 
     Ok(())
 }
@@ -3198,6 +3260,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &["n"],
         doc: "Create a new scratch buffer.",
         fun: new_file,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "term-buffer",
+        aliases: &["termbuf"],
+        doc: "Open a terminal buffer running your shell in the current split.",
+        fun: terminal_new,
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(0)),

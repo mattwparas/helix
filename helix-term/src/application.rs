@@ -144,6 +144,16 @@ impl Application {
 
         compositor.push(editor_view);
 
+        // The tree has no view yet at this point (`Tree::new` leaves `focus`
+        // pointing at the root container), so anything relying on "there is
+        // a current buffer" - `current!`/`current_ref!` and everything built
+        // on them - panics if touched before one exists. The init script
+        // below runs arbitrary plugin code that may well do exactly that
+        // (e.g. a hook or a buffer-creation helper called eagerly at load
+        // time), so give it a real place to land. It's cleaned up below,
+        // once the real initial buffer(s) are open, if nothing claimed it.
+        let placeholder_doc_id = editor.new_file(Action::VerticalSplit);
+
         let mut jobs = Jobs::new();
         {
             let syn_loader = editor.syn_loader.clone();
@@ -173,10 +183,35 @@ impl Application {
         } else if !args.files.is_empty() {
             let mut files_it = args.files.into_iter().peekable();
 
-            // If the first file is a directory, skip it and open a picker
+            // If the first file is a directory, skip it and let a plugin
+            // handle it (e.g. a file-manager buffer bound to a global "oil"
+            // command) - falling back to the native picker if none is
+            // defined.
+            let mut directory_handled_by_plugin = false;
             if let Some((first, _)) = files_it.next_if(|(p, _)| p.is_dir()) {
-                let picker = ui::file_picker(&editor, first);
-                compositor.push(Box::new(overlaid(picker)));
+                let dir_arg = first.to_string_lossy().into_owned();
+                let handled = {
+                    let mut cx = crate::commands::Context {
+                        register: None,
+                        count: std::num::NonZeroUsize::new(1),
+                        editor: &mut editor,
+                        callback: Vec::new(),
+                        on_next_key_callback: None,
+                        jobs: &mut jobs,
+                    };
+                    crate::commands::ScriptingEngine::call_function_by_name(
+                        &mut cx,
+                        "oil",
+                        vec![std::borrow::Cow::Owned(dir_arg)],
+                    )
+                };
+
+                if handled {
+                    directory_handled_by_plugin = true;
+                } else {
+                    let picker = ui::file_picker(&editor, first);
+                    compositor.push(Box::new(overlaid(picker)));
+                }
             }
 
             // If there are any more files specified, open them
@@ -245,7 +280,10 @@ impl Application {
                     let (view, doc) = current!(editor);
                     align_view(doc, view, Align::Center);
                 }
-            } else {
+            } else if !directory_handled_by_plugin {
+                // Only the native-picker path needs a backing scratch buffer
+                // to float over - a plugin that opened a real buffer for the
+                // directory (e.g. oil) doesn't need a second one alongside it.
                 editor.new_file(Action::VerticalSplit);
             }
         } else if stdin().is_terminal() || cfg!(feature = "integration") {
@@ -254,6 +292,19 @@ impl Application {
             editor
                 .new_file_from_stdin(Action::VerticalSplit)
                 .unwrap_or_else(|_| editor.new_file(Action::VerticalSplit));
+        }
+
+        // The real initial buffer(s) are open now, so the placeholder from
+        // before the init script is redundant - unless a hook or other
+        // eagerly-run plugin code actually used it, in which case leave it
+        // alone (same "empty scratch buffer" check `Action::Replace` already
+        // uses elsewhere: unmodified and never given a path).
+        if let Some(doc) = editor.document(placeholder_doc_id) {
+            if !doc.is_modified() && doc.path().is_none() {
+                // `force: false` re-asserts that safety check; it should
+                // never actually reject here given the check above.
+                let _ = editor.close_document(placeholder_doc_id, false);
+            }
         }
 
         #[cfg(windows)]
@@ -924,6 +975,11 @@ impl Application {
                             token,
                             value: lsp::ProgressParamsValue::WorkDone(work),
                         } = params;
+                        let token_str = match &token {
+                            lsp::NumberOrString::Number(n) => n.to_string(),
+                            lsp::NumberOrString::String(s) => s.clone(),
+                        };
+                        let server_name = language_server!().name().to_string();
                         let (title, message, percentage) = match &work {
                             lsp::WorkDoneProgress::Begin(lsp::WorkDoneProgressBegin {
                                 title,
@@ -945,6 +1001,14 @@ impl Application {
                                         editor_view.spinners_mut().get_or_create(server_id).stop();
                                     }
                                     self.editor.clear_status();
+                                    helix_event::dispatch(helix_view::events::LspProgressUpdate {
+                                        server_name: server_name.clone(),
+                                        token: token_str.clone(),
+                                        kind: "end".to_string(),
+                                        title: None,
+                                        message: None,
+                                        percentage: None,
+                                    });
 
                                     // we want to render to clear any leftover spinners or messages
                                     return;
@@ -976,18 +1040,48 @@ impl Application {
 
                         match work {
                             lsp::WorkDoneProgress::Begin(begin_status) => {
+                                let fire_title = Some(begin_status.title.clone());
+                                let fire_message = begin_status.message.clone();
+                                let fire_percentage = begin_status.percentage;
                                 self.lsp_progress
                                     .begin(server_id, token.clone(), begin_status);
+                                helix_event::dispatch(helix_view::events::LspProgressUpdate {
+                                    server_name: server_name.clone(),
+                                    token: token_str.clone(),
+                                    kind: "begin".to_string(),
+                                    title: fire_title,
+                                    message: fire_message,
+                                    percentage: fire_percentage,
+                                });
                             }
                             lsp::WorkDoneProgress::Report(report_status) => {
+                                let fire_message = report_status.message.clone();
+                                let fire_percentage = report_status.percentage;
                                 self.lsp_progress
                                     .update(server_id, token.clone(), report_status);
+                                helix_event::dispatch(helix_view::events::LspProgressUpdate {
+                                    server_name: server_name.clone(),
+                                    token: token_str.clone(),
+                                    kind: "report".to_string(),
+                                    title: None,
+                                    message: fire_message,
+                                    percentage: fire_percentage,
+                                });
                             }
-                            lsp::WorkDoneProgress::End(_) => {
+                            lsp::WorkDoneProgress::End(end_status) => {
+                                let fire_message = end_status.message.clone();
                                 self.lsp_progress.end_progress(server_id, &token);
                                 if !self.lsp_progress.is_progressing(server_id) {
                                     editor_view.spinners_mut().get_or_create(server_id).stop();
                                 };
+                                helix_event::dispatch(helix_view::events::LspProgressUpdate {
+                                    server_name: server_name.clone(),
+                                    token: token_str.clone(),
+                                    kind: "end".to_string(),
+                                    title: None,
+                                    message: fire_message,
+                                    percentage: None,
+                                });
                             }
                         }
                     }
