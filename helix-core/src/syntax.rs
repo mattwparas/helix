@@ -462,7 +462,10 @@ impl Loader {
             .map(|language| &mut language.config)
     }
 
-    pub fn add_language(&mut self, config: LanguageConfiguration) {
+    pub fn add_language(&mut self, mut config: LanguageConfiguration) {
+        if config.language.is_none() {
+            config.language = Some(Language(self.languages.len() as u32));
+        }
         self.languages.push(LanguageData::new(config));
     }
 
