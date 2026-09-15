@@ -216,12 +216,17 @@ pub mod steel_implementations {
             let mut layers: Vec<(Layer, TreeSitterTree)> = vec![];
             let load = |lang| query_map.get(&lang).map(|q| q.get_inner().as_ref());
 
-            for event in syn.query_iter::<_, (), _>(source, load, lower..upper) {
+            let mut iter = syn.query_iter::<_, (), _>(source, load, lower..upper);
+            while let Some(event) = iter.next() {
                 let QueryIterEvent::Match(m) = event else {
                     continue;
                 };
-                let layer = syn.layer_for_byte_range(m.node.start_byte(), m.node.end_byte());
+
+                let layer = iter.current_layer();
                 let lang = syn.layer(layer).language;
+                let Some(query) = query_map.get(&lang) else {
+                    continue;
+                };
 
                 let tree = match layers.iter().position(|(l, _)| l == &layer) {
                     Some(idx) => &layers[idx].1,
@@ -234,12 +239,7 @@ pub mod steel_implementations {
                     }
                 };
 
-                let capture_name = query_map
-                    .get(&lang)
-                    .unwrap()
-                    .get_inner()
-                    .capture_name(m.capture)
-                    .to_string();
+                let capture_name = query.get_inner().capture_name(m.capture).to_string();
 
                 if captures.contains_key(&capture_name) {
                     captures
