@@ -54,19 +54,19 @@ impl Custom for SteelSpan {}
 
 impl SteelSpan {
     pub fn new(content: String, style: Style) -> Self {
-        return Self { content, style };
+        Self { content, style }
     }
 
     pub fn get_content(&self) -> String {
-        return self.content.to_string();
+        self.content.to_string()
     }
 
     pub fn get_style(&self) -> Style {
-        return self.style;
+        self.style
     }
 }
 
-pub fn render_custom_status<'a>(
+pub fn render_custom_status(
     elem: &CustomStatusElement,
     ctx: &mut compositor::Context,
     view_id: ViewId,
@@ -102,7 +102,7 @@ pub fn render_custom_status<'a>(
                     _ => return steelerr!(TypeMismatch => "Wrong return type for status element!"),
                 };
 
-                fn steel_to_span<'a>(val: SteelVal) -> Result<Span<'a>, SteelErr> {
+                fn steel_to_span(val: SteelVal) -> Result<Span<'static>, SteelErr> {
                     match val {
                         SteelVal::Custom(custom) => {
                             let c = custom.write();
@@ -111,21 +111,20 @@ pub fn render_custom_status<'a>(
                                 return steelerr!(
                                     TypeMismatch =>
                                     "Cannot convert value to Span!"
-                                )
-                                .into();
+                                );
                             };
                             Ok(Span::styled(s.get_content(), s.get_style()))
                         }
-                        _ => steelerr!(TypeMismatch => "not a custom type!").into(),
+                        _ => steelerr!(TypeMismatch => "not a custom type!"),
                     }
                 }
 
                 spans.into_iter().map(steel_to_span).collect()
             }) {
-            Ok(ret) => return ret,
+            Ok(ret) => ret,
             Err(e) => {
                 super::present_error_inside_engine_context(&mut ctx, guard, e);
-                return vec![];
+                vec![]
             }
         }
     })
