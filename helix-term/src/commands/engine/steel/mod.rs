@@ -33,7 +33,7 @@ use helix_view::{
     },
     events::{
         DocumentDidChange, DocumentDidClose, DocumentDidOpen, DocumentFocusLost, DocumentSaved,
-        SelectionDidChange,
+        LspProgressUpdate, SelectionDidChange,
     },
     extension::{document_id_to_usize, steel_implementations::CustomStatusElement},
     graphics::CursorKind,
@@ -3441,6 +3441,7 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
         "document-saved" => register_document_saved(generation, rooted),
         "document-changed" => register_document_changed(generation, rooted),
         "document-closed" => register_document_closed(generation, rooted),
+        "lsp-progress" => register_lsp_progress(generation, rooted),
         _ => steelerr!(Generic => "Unable to register hook: Unknown event type: {}", event_kind)
             .into(),
     }
@@ -3606,6 +3607,27 @@ fn register_document_focus_lost(
             construct_callback(generation, cloned_func, [doc_id.into_steelval().unwrap()]);
         job::dispatch_blocking_jobs(callback);
 
+        Ok(())
+    });
+    Ok(SteelVal::Void).into()
+}
+
+fn register_lsp_progress(
+    generation: usize,
+    rooted: RootedSteelVal,
+) -> steel::UnRecoverableResult {
+    register_hook!(move |event: &mut LspProgressUpdate| {
+        let cloned_func = rooted.value().clone();
+        let args = [
+            event.server_name.clone().into_steelval().unwrap(),
+            event.token.clone().into_steelval().unwrap(),
+            event.kind.clone().into_steelval().unwrap(),
+            event.title.clone().into_steelval().unwrap(),
+            event.message.clone().into_steelval().unwrap(),
+            event.percentage.into_steelval().unwrap(),
+        ];
+        let callback = construct_callback(generation, cloned_func, args);
+        job::dispatch_blocking_jobs(callback);
         Ok(())
     });
     Ok(SteelVal::Void).into()

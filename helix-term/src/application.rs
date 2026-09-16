@@ -924,6 +924,11 @@ impl Application {
                             token,
                             value: lsp::ProgressParamsValue::WorkDone(work),
                         } = params;
+                        let token_str = match &token {
+                            lsp::NumberOrString::Number(n) => n.to_string(),
+                            lsp::NumberOrString::String(s) => s.clone(),
+                        };
+                        let server_name = language_server!().name().to_string();
                         let (title, message, percentage) = match &work {
                             lsp::WorkDoneProgress::Begin(lsp::WorkDoneProgressBegin {
                                 title,
@@ -945,6 +950,14 @@ impl Application {
                                         editor_view.spinners_mut().get_or_create(server_id).stop();
                                     }
                                     self.editor.clear_status();
+                                    helix_event::dispatch(helix_view::events::LspProgressUpdate {
+                                        server_name: server_name.clone(),
+                                        token: token_str.clone(),
+                                        kind: "end".to_string(),
+                                        title: None,
+                                        message: None,
+                                        percentage: None,
+                                    });
 
                                     // we want to render to clear any leftover spinners or messages
                                     return;
@@ -976,18 +989,48 @@ impl Application {
 
                         match work {
                             lsp::WorkDoneProgress::Begin(begin_status) => {
+                                let fire_title = Some(begin_status.title.clone());
+                                let fire_message = begin_status.message.clone();
+                                let fire_percentage = begin_status.percentage;
                                 self.lsp_progress
                                     .begin(server_id, token.clone(), begin_status);
+                                helix_event::dispatch(helix_view::events::LspProgressUpdate {
+                                    server_name: server_name.clone(),
+                                    token: token_str.clone(),
+                                    kind: "begin".to_string(),
+                                    title: fire_title,
+                                    message: fire_message,
+                                    percentage: fire_percentage,
+                                });
                             }
                             lsp::WorkDoneProgress::Report(report_status) => {
+                                let fire_message = report_status.message.clone();
+                                let fire_percentage = report_status.percentage;
                                 self.lsp_progress
                                     .update(server_id, token.clone(), report_status);
+                                helix_event::dispatch(helix_view::events::LspProgressUpdate {
+                                    server_name: server_name.clone(),
+                                    token: token_str.clone(),
+                                    kind: "report".to_string(),
+                                    title: None,
+                                    message: fire_message,
+                                    percentage: fire_percentage,
+                                });
                             }
-                            lsp::WorkDoneProgress::End(_) => {
+                            lsp::WorkDoneProgress::End(end_status) => {
+                                let fire_message = end_status.message.clone();
                                 self.lsp_progress.end_progress(server_id, &token);
                                 if !self.lsp_progress.is_progressing(server_id) {
                                     editor_view.spinners_mut().get_or_create(server_id).stop();
                                 };
+                                helix_event::dispatch(helix_view::events::LspProgressUpdate {
+                                    server_name: server_name.clone(),
+                                    token: token_str.clone(),
+                                    kind: "end".to_string(),
+                                    title: None,
+                                    message: fire_message,
+                                    percentage: None,
+                                });
                             }
                         }
                     }

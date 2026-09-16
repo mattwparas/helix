@@ -3,7 +3,7 @@ use helix_view::document::Mode;
 use helix_view::events::{
     ConfigDidChange, DiagnosticsDidChange, DocumentDidChange, DocumentDidClose, DocumentDidOpen,
     DocumentFocusLost, DocumentSaved, LanguageServerExited, LanguageServerInitialized,
-    SelectionDidChange,
+    LspProgressUpdate, SelectionDidChange,
 };
 
 use crate::commands;
@@ -32,5 +32,6 @@ pub fn register() {
     register_event::<DiagnosticsDidChange>();
     register_event::<LanguageServerInitialized>();
     register_event::<LanguageServerExited>();
+    register_event::<LspProgressUpdate>();
     register_event::<ConfigDidChange>();
 }
