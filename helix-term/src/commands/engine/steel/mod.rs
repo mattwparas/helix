@@ -33,7 +33,7 @@ use helix_view::{
     },
     events::{
         DocumentDidChange, DocumentDidClose, DocumentDidOpen, DocumentFocusLost, DocumentSaved,
-        SelectionDidChange,
+        LspProgressUpdate, SelectionDidChange,
     },
     extension::{document_id_to_usize, steel_implementations::CustomStatusElement},
     graphics::CursorKind,
@@ -78,7 +78,10 @@ use crate::{
     commands::{insert, TYPABLE_COMMAND_LIST},
     compositor::{self, Component, Compositor},
     config::Config,
-    events::{OnModeSwitch, PostCommand, PostInsertChar, TerminalFocusGained, TerminalFocusLost},
+    events::{
+        DocumentWillSave, OnModeSwitch, PostCommand, PostInsertChar, TerminalFocusGained,
+        TerminalFocusLost,
+    },
     job::{self, Callback, Jobs},
     keymap::{self, merge_keys, KeyTrie, KeymapResult, MappableCommand},
     ui::{self, picker::PathOrId, PickerColumn, Popup, Prompt, PromptEvent},
@@ -427,6 +430,36 @@ fn reset_buffer_extension_keymap() {
     guard.reverse.clear();
 }
 
+/// Per-name keymaps for Steel-defined modes. When a steel mode is active,
+/// `handle_keymap_event_impl` checks this map first; unrecognised keys fall
+/// through to the buffer/extension keymap.
+pub static STEEL_MODE_KEYBINDING_MAP: Lazy<Mutex<HashMap<String, EmbeddedKeyMap>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn set_custom_mode(cx: &mut Context, name: SteelString) {
+    cx.editor.steel_mode = Some(name.to_string());
+}
+
+fn unset_custom_mode(cx: &mut Context) {
+    cx.editor.steel_mode = None;
+}
+
+fn get_custom_mode(cx: &mut Context) -> SteelVal {
+    match cx.editor.steel_mode.as_deref() {
+        Some(s) => SteelVal::StringV(s.into()),
+        None => SteelVal::BoolV(false),
+    }
+}
+
+fn register_steel_mode_keymap(name: SteelString, keymap: String) -> anyhow::Result<()> {
+    let embedded = string_to_embedded_keymap(keymap)?;
+    STEEL_MODE_KEYBINDING_MAP
+        .lock()
+        .unwrap()
+        .insert(name.to_string(), embedded);
+    Ok(())
+}
+
 enum LspKind {
     Call(RootedSteelVal),
     Notification(RootedSteelVal),
@@ -657,6 +690,17 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         )
         .register_fn_with_ctx(CTX, "regex-selection", regex_selection)
         .register_fn_with_ctx(CTX, "replace-selection-with", replace_selection)
+        .register_fn_with_ctx(CTX, "buffer-set-text!", buffer_set_text)
+        .register_fn_with_ctx(CTX, "buffer-mark-saved!", buffer_mark_saved)
+        .register_fn_with_ctx(CTX, "term-buffer-spawn!", term_buffer_spawn)
+        .register_fn_with_ctx(
+            CTX,
+            "term-buffer-spawn-with-shell!",
+            term_buffer_spawn_with_shell,
+        )
+        .register_fn("term-buffer-hide-gutter!", crate::term_pty::set_hide_gutter)
+        .register_fn("term-buffer-send!", term_buffer_send)
+        .register_fn("term-buffer-alive?", term_buffer_alive)
         .register_fn_with_ctx(
             CTX,
             "enqueue-expression-in-engine",
@@ -1472,6 +1516,12 @@ fn load_editor_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "editor-set-mode!", cx_set_mode)
         .register_fn_with_ctx(CTX, "editor-doc-in-view?", cx_is_document_in_view)
         .register_fn_with_ctx(CTX, "set-scratch-buffer-name!", set_scratch_buffer_name)
+        .register_fn_with_ctx(CTX, "set-bufferline-name!", set_bufferline_name)
+        .register_fn_with_ctx(
+            CTX,
+            "document-set-bufferline-name!",
+            document_set_bufferline_name,
+        )
         // Get the last saved time of the document
         .register_fn_with_ctx(
             CTX,
@@ -1576,6 +1626,13 @@ fn load_editor_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "editor->text", document_id_to_text)
         .register_fn_with_ctx(CTX, "editor-document->path", document_path)
         .register_fn_with_ctx(CTX, "register->value", cx_register_value)
+        .register_fn_with_ctx(
+            CTX,
+            "set-editor-terminal-has-focus!",
+            |cx: &mut Context, focused: bool| {
+                cx.editor.steel_terminal_has_focus = focused;
+            },
+        )
         .register_fn_with_ctx(
             CTX,
             "set-editor-clip-right!",
@@ -2019,6 +2076,22 @@ impl SteelScriptingEngine {
         cx: &mut Context,
         event: KeyEvent,
     ) -> Option<KeymapResult> {
+        // Steel mode keymaps act as priority overrides: if the active steel mode
+        // has registered a keymap that contains this (mode, key) pair, use it.
+        // Unrecognised keys fall through to the buffer/extension keymap below.
+        if let Some(ref mode_name) = cx.editor.steel_mode.clone() {
+            let km_guard = STEEL_MODE_KEYBINDING_MAP.lock().unwrap();
+            if let Some(keymap) = km_guard.get(mode_name) {
+                if keymap.0.contains_key(&mode) {
+                    let result = editor.keymaps.get_with_map(&keymap.0, mode, event);
+                    drop(km_guard);
+                    if !matches!(result, KeymapResult::NotFound) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+
         let extension = {
             let current_focus = cx.editor.tree.focus;
             let view = cx.editor.tree.get(current_focus);
@@ -3438,9 +3511,11 @@ fn register_hook(event_kind: String, callback_fn: SteelVal) -> steel::UnRecovera
         "document-focus-lost" => register_document_focus_lost(generation, rooted),
         "selection-did-change" => register_selection_did_change(generation, rooted),
         "document-opened" => register_document_opened(generation, rooted),
+        "document-will-save" => register_document_will_save(generation, rooted),
         "document-saved" => register_document_saved(generation, rooted),
         "document-changed" => register_document_changed(generation, rooted),
         "document-closed" => register_document_closed(generation, rooted),
+        "lsp-progress" => register_lsp_progress(generation, rooted),
         _ => steelerr!(Generic => "Unable to register hook: Unknown event type: {}", event_kind)
             .into(),
     }
@@ -3611,6 +3686,24 @@ fn register_document_focus_lost(
     Ok(SteelVal::Void).into()
 }
 
+fn register_lsp_progress(generation: usize, rooted: RootedSteelVal) -> steel::UnRecoverableResult {
+    register_hook!(move |event: &mut LspProgressUpdate| {
+        let cloned_func = rooted.value().clone();
+        let args = [
+            event.server_name.clone().into_steelval().unwrap(),
+            event.token.clone().into_steelval().unwrap(),
+            event.kind.clone().into_steelval().unwrap(),
+            event.title.clone().into_steelval().unwrap(),
+            event.message.clone().into_steelval().unwrap(),
+            event.percentage.into_steelval().unwrap(),
+        ];
+        let callback = construct_callback(generation, cloned_func, args);
+        job::dispatch_blocking_jobs(callback);
+        Ok(())
+    });
+    Ok(SteelVal::Void).into()
+}
+
 fn register_post_command(generation: usize, rooted: RootedSteelVal) -> steel::UnRecoverableResult {
     register_hook!(move |event: &mut PostCommand<'_, '_>| {
         generation_call_with_args(
@@ -3619,6 +3712,49 @@ fn register_post_command(generation: usize, rooted: RootedSteelVal) -> steel::Un
             rooted.value().clone(),
             &mut [event.command.name().into_steelval().unwrap()],
         );
+        Ok(())
+    });
+    Ok(SteelVal::Void).into()
+}
+
+/// Unlike the other hooks, this one is dispatched synchronously and its
+/// return value is observed: the callback returning `#true` cancels the
+/// save (the callback is expected to have handled it itself), matching
+/// `document-will-save`'s "was this handled" contract described in its doc
+/// comment. Every other hook here discards the callback's return value and
+/// runs through the (deferred) job queue instead, which can't work for a
+/// hook that needs to short-circuit a decision the caller is about to make.
+fn register_document_will_save(
+    generation: usize,
+    rooted: RootedSteelVal,
+) -> steel::UnRecoverableResult {
+    register_hook!(move |event: &mut DocumentWillSave<'_, '_>| {
+        if !is_current_generation(generation) {
+            return Ok(());
+        }
+
+        let doc_id = event.doc;
+        let path = event
+            .path
+            .map(|p| p.to_string_lossy().to_string())
+            .into_steelval()
+            .unwrap();
+
+        let result = enter_engine(|guard| {
+            call_with_context_and_args(
+                guard,
+                event.cx,
+                rooted.value().clone(),
+                &mut [doc_id.into_steelval().unwrap(), path],
+            )
+        });
+
+        match result {
+            Ok(SteelVal::BoolV(true)) => *event.cancel = true,
+            Ok(_) => {}
+            Err(e) => event.cx.editor.set_error(e.to_string()),
+        }
+
         Ok(())
     });
     Ok(SteelVal::Void).into()
@@ -4066,9 +4202,23 @@ fn load_misc_api(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "helix-await-callback", await_value)
         .register_fn_with_ctx(CTX, "await-callback", await_value)
         .register_fn_with_ctx(CTX, "add-inlay-hint", add_inlay_hint)
+        .register_fn_with_ctx(CTX, "add-typed-inlay-hint", add_typed_inlay_hint)
+        .register_fn_with_ctx(CTX, "add-scoped-inlay-hint", add_scoped_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint", remove_inlay_hint)
         .register_fn_with_ctx(CTX, "remove-inlay-hint-by-id", remove_inlay_hint_by_id)
-        .register_fn("fuzzy-match", fuzzy_match);
+        .register_fn("fuzzy-match", fuzzy_match)
+        .register_fn_with_ctx(CTX, "steel-mode", get_custom_mode)
+        .register_fn_with_ctx(CTX, "set-steel-mode!", set_custom_mode)
+        .register_fn_with_ctx(CTX, "unset-steel-mode!", unset_custom_mode)
+        .register_fn("register-steel-mode-keymap!", register_steel_mode_keymap)
+        .register_fn_with_ctx(CTX, "selection-char-ranges", selection_char_ranges)
+        .register_fn_with_ctx(CTX, "set-document-highlights!", set_script_highlights)
+        .register_fn_with_ctx(CTX, "clear-document-highlights!", clear_script_highlights)
+        .register_fn_with_ctx(
+            CTX,
+            "clear-all-document-highlights!",
+            clear_all_script_highlights,
+        );
 
     if generate_sources {
         generate_module("misc.scm", &builtin_misc_module);
@@ -4106,6 +4256,17 @@ pub fn load_ext_api(engine: &mut Engine, generate_sources: bool) {
     engine.register_steel_module("helix/ext.scm".to_string(), ext_api.to_string());
 }
 
+pub fn load_buffer_types_api(engine: &mut Engine, generate_sources: bool) {
+    let buffer_types_api = include_str!("buffer-types.scm");
+    if generate_sources {
+        generate_module("buffer-types.scm", buffer_types_api);
+    }
+    engine.register_steel_module(
+        "helix/buffer-types.scm".to_string(),
+        buffer_types_api.to_string(),
+    );
+}
+
 // Note: This implementation is aligned with what the steel language server
 // expects. This shouldn't stay here, but for alpha purposes its fine.
 pub fn steel_lsp_home_dir() -> PathBuf {
@@ -4141,6 +4302,7 @@ pub fn configure_builtin_sources(engine: &mut Engine, generate_sources: bool) {
     load_high_level_theme_api(engine, generate_sources);
     load_high_level_keymap_api(engine, generate_sources);
     load_ext_api(engine, generate_sources);
+    load_buffer_types_api(engine, generate_sources);
 
     if generate_sources {
         configure_lsp_globals();
@@ -4250,6 +4412,15 @@ fn fuzzy_match(pattern: SteelString, items: SteelVal) -> Vec<SteelVal> {
     }
 
     Vec::new()
+}
+
+/// A row for `#%location-picker`: a display label plus a file location to
+/// preview (and jump to) at a line range.
+struct LocationRow {
+    label: String,
+    path: PathBuf,
+    line_start: usize,
+    line_end: usize,
 }
 
 fn configure_engine_impl(mut engine: Engine) -> Engine {
@@ -4521,6 +4692,140 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
         },
     );
 
+    // String picker: like #%exp-picker but items are arbitrary strings, not file paths.
+    // The callback receives the selected string as its sole argument.
+    engine.register_fn(
+        "#%string-picker",
+        |values: Vec<String>, callback_fn: SteelVal| -> WrappedDynComponent {
+            let columns = [PickerColumn::new("item", |item: &String, _: &()| {
+                item.as_str().into()
+            })];
+
+            let rooted = callback_fn.as_rooted();
+
+            let picker = ui::Picker::new(columns, 0, [], (), move |cx, item: &String, _action| {
+                let selected = item.clone();
+                with_ephemeral_context(cx, |ctx| {
+                    let cloned_func = rooted.value();
+                    enter_engine(|guard| {
+                        if let Err(e) = guard
+                            .with_mut_reference::<Context, Context>(ctx)
+                            .consume_once(move |engine, args| {
+                                let context = args.into_iter().next().unwrap();
+                                engine.update_value(CTX, context);
+                                engine.call_function_with_args(
+                                    cloned_func.clone(),
+                                    vec![SteelVal::StringV(selected.into())],
+                                )
+                            })
+                        {
+                            present_error_inside_engine_context(ctx, guard, e);
+                        }
+                    });
+                });
+            });
+
+            let injector = picker.injector();
+
+            for item in values {
+                if injector.push(item).is_err() {
+                    break;
+                }
+            }
+
+            WrappedDynComponent {
+                inner: Some(Box::new(ui::overlay::overlaid(picker))),
+            }
+        },
+    );
+
+    // Location picker: native picker over (label, path, line-start, line-end)
+    // rows. Previews the file scrolled to and highlighting the line range, and
+    // on selection opens the file and jumps to it. Same look/behaviour as the
+    // built-in diagnostics / global-search pickers.
+    engine.register_fn(
+        "#%location-picker",
+        |labels: Vec<String>,
+         paths: Vec<String>,
+         line_starts: Vec<usize>,
+         line_ends: Vec<usize>,
+         callback_fn: SteelVal|
+         -> WrappedDynComponent {
+            let rows: Vec<LocationRow> = labels
+                .into_iter()
+                .zip(paths)
+                .zip(line_starts)
+                .zip(line_ends)
+                .map(|(((label, path), line_start), line_end)| LocationRow {
+                    label,
+                    path: PathBuf::from(path),
+                    line_start,
+                    line_end,
+                })
+                .collect();
+
+            let columns = [PickerColumn::new(
+                "location",
+                |row: &LocationRow, _: &()| row.label.as_str().into(),
+            )];
+
+            let rooted = callback_fn.as_rooted();
+            let picker = ui::Picker::new(
+                columns,
+                0,
+                rows,
+                (),
+                move |cx, row: &LocationRow, action| {
+                    if let Err(e) = cx.editor.open(&row.path, action) {
+                        cx.editor.set_error(format!(
+                            "Failed to open '{}': {}",
+                            row.path.display(),
+                            e
+                        ));
+                        return;
+                    }
+                    {
+                        let (view, doc) = current!(cx.editor);
+                        let text = doc.text();
+                        if row.line_start < text.len_lines() {
+                            let start = text.line_to_char(row.line_start);
+                            doc.set_selection(view.id, Selection::point(start));
+                            if action.align_view(view, doc.id()) {
+                                helix_view::align_view(doc, view, helix_view::Align::Center);
+                            }
+                        }
+                    }
+                    // Run the Steel callback (no args) after the jump.
+                    with_ephemeral_context(cx, |ctx| {
+                        let cloned_func = rooted.value();
+                        enter_engine(|guard| {
+                            if let Err(e) = guard
+                                .with_mut_reference::<Context, Context>(ctx)
+                                .consume_once(move |engine, args| {
+                                    let context = args.into_iter().next().unwrap();
+                                    engine.update_value(CTX, context);
+                                    engine.call_function_with_args(cloned_func.clone(), Vec::new())
+                                })
+                            {
+                                present_error_inside_engine_context(ctx, guard, e);
+                            }
+                        });
+                    });
+                },
+            )
+            .with_preview(|_editor, row: &LocationRow| {
+                Some((
+                    PathOrId::Path(row.path.as_path()),
+                    Some((row.line_start, row.line_end)),
+                ))
+            });
+
+            WrappedDynComponent {
+                inner: Some(Box::new(ui::overlay::overlaid(picker))),
+            }
+        },
+    );
+
     engine.register_fn("Component::Text", |contents: String| WrappedDynComponent {
         inner: Some(Box::new(crate::ui::Text::new(contents))),
     });
@@ -4601,6 +4906,68 @@ fn get_highlighted_text(cx: &mut Context) -> String {
 fn current_selection(cx: &mut Context) -> Selection {
     let (view, doc) = current_ref!(cx.editor);
     doc.selection(view.id).clone()
+}
+
+fn selection_char_ranges(cx: &mut Context) -> Vec<(usize, usize)> {
+    let (view, doc) = current_ref!(cx.editor);
+    doc.selection(view.id)
+        .iter()
+        .map(|r| (r.from(), r.to()))
+        .collect()
+}
+
+fn set_script_highlights(
+    cx: &mut Context,
+    namespace: SteelString,
+    ranges: Vec<SteelVal>,
+    scope: SteelString,
+) -> anyhow::Result<()> {
+    let ranges: anyhow::Result<Vec<std::ops::Range<usize>>> = ranges
+        .into_iter()
+        .map(|v| match v {
+            SteelVal::ListV(pair) => {
+                let mut iter = pair.iter();
+                let start = iter
+                    .next()
+                    .and_then(|v| v.as_isize())
+                    .ok_or_else(|| anyhow::anyhow!("range start must be an integer"))?
+                    as usize;
+                let end = iter
+                    .next()
+                    .and_then(|v| v.as_isize())
+                    .ok_or_else(|| anyhow::anyhow!("range end must be an integer"))?
+                    as usize;
+                Ok(start..end)
+            }
+            SteelVal::Pair(pair) => {
+                let start = pair
+                    .car()
+                    .as_isize()
+                    .ok_or_else(|| anyhow::anyhow!("range start must be an integer"))?
+                    as usize;
+                let end = pair
+                    .cdr()
+                    .as_isize()
+                    .ok_or_else(|| anyhow::anyhow!("range end must be an integer"))?
+                    as usize;
+                Ok(start..end)
+            }
+            other => anyhow::bail!("expected (start . end) pair, got {:?}", other),
+        })
+        .collect();
+    let (_, doc) = current!(cx.editor);
+    doc.set_script_highlights(namespace.to_string(), scope.to_string(), ranges?);
+    Ok(())
+}
+
+fn clear_script_highlights(cx: &mut Context, namespace: SteelString) {
+    let (_, doc) = current!(cx.editor);
+    doc.clear_script_highlights(&namespace);
+}
+
+fn clear_all_script_highlights(cx: &mut Context) {
+    let (_, doc) = current!(cx.editor);
+    doc.clear_all_script_highlights();
 }
 
 fn set_selection(cx: &mut Context, selection: Selection) {
@@ -4814,7 +5181,9 @@ fn get_init_scm_path() -> String {
 // TODO:
 fn current_path(cx: &mut Context) -> Option<String> {
     let current_focus = cx.editor.tree.focus;
-    let view = cx.editor.tree.get(current_focus);
+    // `tree.focus` can transiently point at an already-removed view during
+    // teardown (e.g. quit) - guard instead of unwrapping.
+    let view = cx.editor.tree.try_get(current_focus)?;
     let doc = &view.doc;
     // Lifetime of this needs to be tied to the existing document
     let current_doc = cx.editor.documents.get(doc);
@@ -4830,6 +5199,30 @@ fn set_scratch_buffer_name(cx: &mut Context, name: String) {
 
     if let Some(current_doc) = current_doc {
         current_doc.name = Some(name);
+    }
+}
+
+// A short label for the bufferline tab specifically - `name` (set via
+// set-scratch-buffer-name!) is shown in the statusline and can reasonably be
+// long (e.g. a full directory path), but the bufferline only has room for a
+// short tab title.
+fn set_bufferline_name(cx: &mut Context, name: String) {
+    let current_focus = cx.editor.tree.focus;
+    let Some(doc) = cx.editor.tree.try_get(current_focus).map(|view| view.doc) else {
+        return;
+    };
+
+    if let Some(current_doc) = cx.editor.documents.get_mut(&doc) {
+        current_doc.bufferline_name = Some(name);
+    }
+}
+
+// Same as `set_bufferline_name`, but by doc-id rather than "current buffer"
+// — needed for a terminal buffer between `term-buffer-spawn!` returning and
+// its first reveal, since it isn't the current buffer yet at that point.
+fn document_set_bufferline_name(cx: &mut Context, doc_id: DocumentId, name: String) {
+    if let Some(doc) = cx.editor.documents.get_mut(&doc_id) {
+        doc.bufferline_name = Some(name);
     }
 }
 
@@ -4855,8 +5248,10 @@ fn cx_current_focus(cx: &mut Context) -> helix_view::ViewId {
     cx.editor.tree.focus
 }
 
-fn cx_get_document_id(cx: &mut Context, view_id: helix_view::ViewId) -> DocumentId {
-    cx.editor.tree.get(view_id).doc
+fn cx_get_document_id(cx: &mut Context, view_id: helix_view::ViewId) -> Option<DocumentId> {
+    // `view_id` may no longer exist in the tree - e.g. `tree.focus` can be left
+    // pointing at an already-removed view transiently during teardown (quit).
+    cx.editor.tree.try_get(view_id).map(|view| view.doc)
 }
 
 fn document_id_to_text(cx: &mut Context, doc_id: DocumentId) -> Option<SteelRopeSlice> {
@@ -5326,6 +5721,96 @@ fn replace_selection(cx: &mut Context, value: String) {
     doc.apply(&transaction, view.id);
 }
 
+// Replace the entire contents of the current buffer with `text`, diffing against the
+// existing content so undo history and mapped state (selections, diagnostics, etc.)
+// stay coherent instead of being nuked by a delete-then-insert.
+fn buffer_set_text(cx: &mut Context, text: SteelString) {
+    let (view, doc) = current!(cx.editor);
+    let new_text = helix_core::Rope::from(text.as_str());
+    let transaction = helix_core::diff::compare_ropes(doc.text(), &new_text);
+    doc.apply(&transaction, view.id);
+}
+
+// Mark the current buffer as saved at its current revision, without writing
+// anything to disk. For a `document-will-save` hook that takes over a save
+// itself (see `helix/buffer-types.scm`), this is how it clears the modified
+// indicator afterward, same as a real write would have.
+fn buffer_mark_saved(cx: &mut Context) {
+    let (_, doc) = current!(cx.editor);
+    let rev = doc.get_current_revision();
+    doc.set_last_saved_revision(rev, std::time::SystemTime::now());
+}
+
+// Spawn `command` (run as `shell -c command`) as a new terminal buffer
+// replacing the current view's document — same machinery as the native
+// `:term-buffer` command, but for an arbitrary program instead of an
+// interactive shell. Lets plugins (lazygit.hx, sidekick.hx, ...) embed a
+// specific program as a real buffer, with bufferline/split/buffer-nav for
+// free, instead of the old floating-component terminal.
+fn term_buffer_spawn_impl(
+    cx: &mut Context,
+    command: &str,
+    shell: Option<&str>,
+) -> anyhow::Result<DocumentId> {
+    let (view, doc) = current!(cx.editor);
+    let view_id = view.id;
+    let area = view.inner_area(doc);
+    // See the matching comment in `terminal_new` (commands/typed.rs): one
+    // column of slack so a full-width pty line doesn't sit exactly on
+    // Helix's soft-wrap boundary.
+    let (rows, cols) = (area.height.max(1), area.width.saturating_sub(1).max(1));
+
+    // Created but not switched to yet: term_pty::PtySession reveals it once
+    // the child process has actually produced something to show, instead of
+    // flashing an empty buffer during its own shell-fork/exec/init latency.
+    // Callers name the buffer via `document-set-bufferline-name!` with the
+    // returned doc-id, since `set-bufferline-name!`'s "current buffer"
+    // convention no longer points at it yet.
+    let mut new_doc =
+        helix_view::Document::default(cx.editor.config.clone(), cx.editor.syn_loader.clone());
+    new_doc.is_terminal_buffer = true;
+    let doc_id = cx.editor.new_document(new_doc);
+
+    crate::term_pty::PtySession::spawn(doc_id, view_id, rows, cols, Some(command), shell)?;
+
+    Ok(doc_id)
+}
+
+fn term_buffer_spawn(cx: &mut Context, command: SteelString) -> anyhow::Result<DocumentId> {
+    term_buffer_spawn_impl(cx, command.as_str(), None)
+}
+
+// Same as `term_buffer_spawn`, but running `command` under an explicitly
+// chosen shell instead of `$SHELL`. For commands using syntax that isn't
+// portable across shells (e.g. POSIX `(...)` subshell grouping, which fish
+// doesn't understand the same way bash does) — pin `bash` rather than
+// gamble on what the user's login shell happens to be.
+fn term_buffer_spawn_with_shell(
+    cx: &mut Context,
+    command: SteelString,
+    shell: SteelString,
+) -> anyhow::Result<DocumentId> {
+    term_buffer_spawn_impl(cx, command.as_str(), Some(shell.as_str()))
+}
+
+// Write raw bytes to a terminal buffer's child process stdin. No implicit
+// newline appended — same convention the old `pty-process-send-command` had;
+// callers append `\r` themselves.
+fn term_buffer_send(doc_id: DocumentId, text: SteelString) {
+    if let Some(session) = crate::term_pty::get(doc_id) {
+        session.write_input(text.as_bytes());
+    }
+}
+
+// Whether `doc-id` is a still-running terminal buffer. A terminal buffer
+// closes itself (and this becomes false) the moment its child process
+// exits — see `term_pty::cleanup`, wired to the `document-closed` hook —
+// so this doubles as "is the process still alive", not just "does this
+// document still exist".
+fn term_buffer_alive(doc_id: DocumentId) -> bool {
+    crate::term_pty::is_terminal(doc_id)
+}
+
 // TODO: Remove this!
 fn move_window_to_the_left(cx: &mut Context) {
     while cx
@@ -5559,6 +6044,95 @@ pub fn add_inlay_hint(
 
     doc.set_inlay_hints(view_id, new_inlay_hints);
 
+    Some((id.first_line, id.last_line))
+}
+
+// "add-typed-inlay-hint" — like add-inlay-hint but kind selects the theme scope:
+//   "type"      → ui.virtual.inlay-hint.type
+//   "parameter" → ui.virtual.inlay-hint.parameter
+//   anything else → ui.virtual.inlay-hint (same as add-inlay-hint)
+pub fn add_typed_inlay_hint(
+    cx: &mut Context,
+    char_index: usize,
+    completion: SteelString,
+    kind: SteelString,
+) -> Option<(usize, usize)> {
+    let view_id = cx.editor.tree.focus;
+    if !cx.editor.tree.contains(view_id) {
+        return None;
+    }
+    let view = cx.editor.tree.get(view_id);
+    let doc_id = cx.editor.tree.get(view_id).doc;
+    let doc = cx.editor.documents.get_mut(&doc_id)?;
+    let mut new_inlay_hints = doc.inlay_hints(view_id).cloned().unwrap_or_else(|| {
+        let doc_text = doc.text();
+        let len_lines = doc_text.len_lines();
+        let view_height = view.inner_height();
+        let first_visible_line =
+            doc_text.char_to_line(doc.view_offset(view_id).anchor.min(doc_text.len_chars()));
+        let first_line = first_visible_line.saturating_sub(view_height);
+        let last_line = first_visible_line
+            .saturating_add(view_height.saturating_mul(2))
+            .min(len_lines);
+        DocumentInlayHints::empty_with_id(DocumentInlayHintsId {
+            first_line,
+            last_line,
+        })
+    });
+
+    let annotation = InlineAnnotation::new(char_index, completion.to_string());
+    match kind.as_str() {
+        "type" => new_inlay_hints.type_inlay_hints.push(annotation),
+        "parameter" => new_inlay_hints.parameter_inlay_hints.push(annotation),
+        _ => new_inlay_hints.other_inlay_hints.push(annotation),
+    }
+
+    let id = new_inlay_hints.id;
+    doc.set_inlay_hints(view_id, new_inlay_hints);
+    Some((id.first_line, id.last_line))
+}
+
+/// Add an inlay hint styled by an explicit theme scope (e.g. "diff.plus",
+/// "diagnostic.warning"). The scope is resolved to a highlight at render time,
+/// so the color follows the active theme — unlike add-typed-inlay-hint, which
+/// is limited to the fixed ui.virtual.inlay-hint.{type,parameter} scopes.
+pub fn add_scoped_inlay_hint(
+    cx: &mut Context,
+    char_index: usize,
+    completion: SteelString,
+    scope: SteelString,
+) -> Option<(usize, usize)> {
+    let view_id = cx.editor.tree.focus;
+    if !cx.editor.tree.contains(view_id) {
+        return None;
+    }
+    let view = cx.editor.tree.get(view_id);
+    let doc_id = cx.editor.tree.get(view_id).doc;
+    let doc = cx.editor.documents.get_mut(&doc_id)?;
+    let mut new_inlay_hints = doc.inlay_hints(view_id).cloned().unwrap_or_else(|| {
+        let doc_text = doc.text();
+        let len_lines = doc_text.len_lines();
+        let view_height = view.inner_height();
+        let first_visible_line =
+            doc_text.char_to_line(doc.view_offset(view_id).anchor.min(doc_text.len_chars()));
+        let first_line = first_visible_line.saturating_sub(view_height);
+        let last_line = first_visible_line
+            .saturating_add(view_height.saturating_mul(2))
+            .min(len_lines);
+        DocumentInlayHints::empty_with_id(DocumentInlayHintsId {
+            first_line,
+            last_line,
+        })
+    });
+
+    let annotation = InlineAnnotation::new(char_index, completion.to_string());
+    new_inlay_hints.scoped_inlay_hints.push(annotation);
+    new_inlay_hints
+        .scoped_inlay_hint_scopes
+        .push(scope.to_string());
+
+    let id = new_inlay_hints.id;
+    doc.set_inlay_hints(view_id, new_inlay_hints);
     Some((id.first_line, id.last_line))
 }
 

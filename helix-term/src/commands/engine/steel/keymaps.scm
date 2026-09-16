@@ -9,7 +9,8 @@
          deep-copy-global-keybindings
          keymap
          query-keymap
-         query-global-keymap)
+         query-global-keymap
+         buffer-set-keymap!)
 
 (define (get-doc name)
   ;; Do our best - if the identifier doesn't exist (for example, if we're checking)
@@ -44,6 +45,35 @@
 ;; Insert a value into the reverse buffer map
 (define (*reverse-buffer-map-insert* key value)
   (helix.keymaps.#%add-reverse-mapping key value))
+
+;;@doc
+;; Bind `keymap` to this specific document instance, independent of its file
+;; extension. This is the primitive plugin-owned buffers (file explorers, diff
+;; views, or any other "buffer as UI" plugin) need to give each buffer its own
+;; keys without affecting every other buffer of the same filetype - unlike
+;; `(keymap (extension ...))`, which applies to every buffer sharing that
+;; extension.
+;;
+;; The keymap only applies while `doc-id` stays open; closing the buffer does
+;; not need to be paired with any cleanup call.
+;;
+;; ```scheme
+;; (buffer-set-keymap! doc-id keymap) -> void?
+;;
+;; doc-id : DocumentId?
+;; keymap : hash? ;; As constructed via the `keymap` macro, e.g. `(keymap (normal ...))`
+;; ```
+;;
+;; # Examples
+;; ```scheme
+;; (buffer-set-keymap! (editor->doc-id (editor-focus))
+;;                      (keymap (normal (ret ":oil-open-under-cursor")
+;;                                      (q ":oil-close"))))
+;; ```
+(define (buffer-set-keymap! doc-id km)
+  (define label (number->string (doc-id->usize doc-id)))
+  (helix.keymaps.#%add-extension-or-labeled-keymap label (merge-keybindings (empty-map) km))
+  (*reverse-buffer-map-insert* (doc-id->usize doc-id) label))
 
 ;; Marshall values in and out of keybindings, referencing the associated values
 ;; within steel

@@ -2,6 +2,7 @@ pub mod default;
 pub mod macros;
 
 pub use crate::commands::MappableCommand;
+use crate::commands::engine::ScriptingEngine;
 pub use default::default;
 
 use arc_swap::{
@@ -55,17 +56,33 @@ impl KeyTrieNode {
     }
 
     pub fn infobox(&self) -> Info {
-        let mut body: Vec<(BTreeSet<KeyEvent>, &str)> = Vec::with_capacity(self.len());
+        let mut body: Vec<(BTreeSet<KeyEvent>, Cow<str>)> = Vec::with_capacity(self.len());
         for (&key, trie) in self.iter() {
-            let desc = match trie {
+            let desc: Cow<str> = match trie {
                 KeyTrie::MappableCommand(cmd) => {
                     if cmd.name() == "no_op" {
                         continue;
                     }
-                    cmd.doc()
+                    match cmd {
+                        // Typable commands backed by a steel plugin fall back to a
+                        // generic "Undocumented plugin command" doc (set at parse
+                        // time, before the engine has loaded any `;;@doc` comments).
+                        // Resolve the real doc lazily here instead, since by the
+                        // time a keymap infobox is shown the engine is up.
+                        MappableCommand::Typable { .. } => {
+                            ScriptingEngine::get_doc_for_identifier(cmd.name())
+                                .and_then(|doc| {
+                                    let first_line = doc.lines().next().unwrap_or_default();
+                                    (!first_line.is_empty())
+                                        .then(|| Cow::Owned(first_line.to_string()))
+                                })
+                                .unwrap_or_else(|| Cow::Borrowed(cmd.doc()))
+                        }
+                        _ => Cow::Borrowed(cmd.doc()),
+                    }
                 }
-                KeyTrie::Node(n) => &n.name,
-                KeyTrie::Sequence(_) => "[Multiple commands]",
+                KeyTrie::Node(n) => Cow::Borrowed(n.name.as_str()),
+                KeyTrie::Sequence(_) => Cow::Borrowed("[Multiple commands]"),
             };
             match body.iter().position(|(_, d)| d == &desc) {
                 Some(pos) => {
