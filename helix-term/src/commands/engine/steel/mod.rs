@@ -2378,19 +2378,12 @@ impl HelixConfiguration {
             toml_value.get("persistent-diagnostic-sources").is_some();
 
         // Existing language config:
-        let mut existing_config = self
+        let existing_config = self
             .language_configuration
             .load()
             .language_configs()
             .find(|x| x.language_id == language.as_str())
-            .unwrap()
-            .clone();
-
-        if toml_value.get("scope").is_none() {
-            toml_value
-                .as_table_mut()
-                .and_then(|x| x.insert("scope".to_string(), existing_config.scope.into()));
-        }
+            .cloned();
 
         for need_empty in ["file-types", "shebangs", "roots"] {
             if toml_value.get(need_empty).is_none() {
@@ -2400,99 +2393,113 @@ impl HelixConfiguration {
             }
         }
 
-        let new_config: LanguageConfiguration = toml_value.try_into()?;
+        let existing_config = if let Some(mut existing_config) = existing_config {
+            if toml_value.get("scope").is_none() {
+                toml_value
+                    .as_table_mut()
+                    .and_then(|x| x.insert("scope".to_string(), existing_config.scope.into()));
+            }
 
-        if let Some(id) = new_config.language_server_language_id {
-            existing_config.language_server_language_id = Some(id);
-        }
+            let new_config: LanguageConfiguration = toml_value.try_into()?;
 
-        // Take the new scope, since its already set to the old one as a default.
-        existing_config.scope = new_config.scope;
+            if let Some(id) = new_config.language_server_language_id {
+                existing_config.language_server_language_id = Some(id);
+            }
 
-        if !new_config.file_types.is_empty() {
-            existing_config.file_types = new_config.file_types;
-        }
+            // Take the new scope, since its already set to the old one as a default.
+            existing_config.scope = new_config.scope;
 
-        if !new_config.shebangs.is_empty() {
-            existing_config.shebangs = new_config.shebangs;
-        }
+            if !new_config.file_types.is_empty() {
+                existing_config.file_types = new_config.file_types;
+            }
 
-        if !new_config.roots.inner.is_empty() {
-            existing_config.roots = new_config.roots;
-        }
+            if !new_config.shebangs.is_empty() {
+                existing_config.shebangs = new_config.shebangs;
+            }
 
-        if let Some(comment_tokens) = new_config.comment_tokens {
-            existing_config.comment_tokens = Some(comment_tokens);
-        }
+            if !new_config.roots.inner.is_empty() {
+                existing_config.roots = new_config.roots;
+            }
 
-        if let Some(block_comment_tokens) = new_config.block_comment_tokens {
-            existing_config.block_comment_tokens = Some(block_comment_tokens);
-        }
+            if let Some(comment_tokens) = new_config.comment_tokens {
+                existing_config.comment_tokens = Some(comment_tokens);
+            }
 
-        if let Some(text_width) = new_config.text_width {
-            existing_config.text_width = Some(text_width);
-        }
+            if let Some(block_comment_tokens) = new_config.block_comment_tokens {
+                existing_config.block_comment_tokens = Some(block_comment_tokens);
+            }
 
-        if let Some(soft_wrap) = new_config.soft_wrap {
-            existing_config.soft_wrap = Some(soft_wrap);
-        }
+            if let Some(text_width) = new_config.text_width {
+                existing_config.text_width = Some(text_width);
+            }
 
-        if auto_format_present {
-            existing_config.auto_format = new_config.auto_format;
-        }
+            if let Some(soft_wrap) = new_config.soft_wrap {
+                existing_config.soft_wrap = Some(soft_wrap);
+            }
 
-        if let Some(formatter) = new_config.formatter {
-            existing_config.formatter = Some(formatter);
-        }
+            if auto_format_present {
+                existing_config.auto_format = new_config.auto_format;
+            }
 
-        if let Some(path_complation) = new_config.path_completion {
-            existing_config.path_completion = Some(path_complation);
-        }
+            if let Some(formatter) = new_config.formatter {
+                existing_config.formatter = Some(formatter);
+            }
 
-        if diagnostic_severity_present {
-            existing_config.diagnostic_severity = new_config.diagnostic_severity;
-        }
+            if let Some(path_complation) = new_config.path_completion {
+                existing_config.path_completion = Some(path_complation);
+            }
 
-        if let Some(grammar) = new_config.grammar {
-            existing_config.grammar = Some(grammar);
-        }
+            if diagnostic_severity_present {
+                existing_config.diagnostic_severity = new_config.diagnostic_severity;
+            }
 
-        if let Some(injection_regex) = new_config.injection_regex {
-            existing_config.injection_regex = Some(injection_regex);
-        }
+            if let Some(grammar) = new_config.grammar {
+                existing_config.grammar = Some(grammar);
+            }
 
-        if language_servers_present {
-            existing_config.language_servers = new_config.language_servers;
-        }
+            if let Some(injection_regex) = new_config.injection_regex {
+                existing_config.injection_regex = Some(injection_regex);
+            }
 
-        if let Some(indent) = new_config.indent {
-            existing_config.indent = Some(indent);
-        }
+            if language_servers_present {
+                existing_config.language_servers = new_config.language_servers;
+            }
 
-        if let Some(debugger) = new_config.debugger {
-            existing_config.debugger = Some(debugger);
-        }
+            if let Some(indent) = new_config.indent {
+                existing_config.indent = Some(indent);
+            }
 
-        if let Some(auto_pairs) = new_config.auto_pairs {
-            existing_config.auto_pairs = Some(auto_pairs);
-        }
+            if let Some(debugger) = new_config.debugger {
+                existing_config.debugger = Some(debugger);
+            }
 
-        if let Some(rulers) = new_config.rulers {
-            existing_config.rulers = Some(rulers);
-        }
+            if let Some(auto_pairs) = new_config.auto_pairs {
+                existing_config.auto_pairs = Some(auto_pairs);
+            }
 
-        if let Some(workspace_lsp_roots) = new_config.workspace_lsp_roots {
-            existing_config.workspace_lsp_roots = Some(workspace_lsp_roots);
-        }
+            if let Some(rulers) = new_config.rulers {
+                existing_config.rulers = Some(rulers);
+            }
 
-        if let Some(rainbow) = new_config.rainbow_brackets {
-            existing_config.rainbow_brackets = Some(rainbow);
-        }
+            if let Some(workspace_lsp_roots) = new_config.workspace_lsp_roots {
+                existing_config.workspace_lsp_roots = Some(workspace_lsp_roots);
+            }
 
-        if persistent_diagnostic_sources_present {
-            existing_config.persistent_diagnostic_sources =
-                new_config.persistent_diagnostic_sources;
-        }
+            if let Some(rainbow) = new_config.rainbow_brackets {
+                existing_config.rainbow_brackets = Some(rainbow);
+            }
+
+            if persistent_diagnostic_sources_present {
+                existing_config.persistent_diagnostic_sources =
+                    new_config.persistent_diagnostic_sources;
+            }
+
+            existing_config
+        } else if toml_value.get("scope").is_some() {
+            toml_value.try_into()?
+        } else {
+            anyhow::bail!("The `scope` field is mandatory when defining a new language.");
+        };
 
         self.update_individual_language_config(IndividualLanguageConfiguration {
             config: existing_config,
