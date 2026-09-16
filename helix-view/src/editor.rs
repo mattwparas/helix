@@ -1363,6 +1363,16 @@ pub struct Editor {
     pub editor_clipping: ClippingConfiguration,
 
     pub workspace_trust: WorkspaceTrust,
+
+    /// File paths passed on the command line at startup (empty if none, e.g.
+    /// a bare `hx` invocation that opens the default scratch buffer).
+    /// Mirrors Neovim's `argv()`. Set once in `Application::new`, before the
+    /// initialization script runs and before the paths are consumed to open
+    /// documents: opening the default scratch buffer doesn't dispatch a
+    /// document event, so this is the only point at which "no file arguments
+    /// were given" can be distinguished from every later point in the
+    /// session.
+    pub startup_file_args: Vec<PathBuf>,
 }
 
 #[derive(Default)]
@@ -1498,6 +1508,7 @@ impl Editor {
             editor_clipping: ClippingConfiguration::default(),
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
             workspace_trust,
+            startup_file_args: Vec::new(),
         }
     }
 

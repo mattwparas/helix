@@ -672,6 +672,7 @@ fn load_static_commands(engine: &mut Engine, generate_sources: bool) {
         .register_fn_with_ctx(CTX, "get-current-column-number", current_column_number)
         .register_fn_with_ctx(CTX, "current-selection-object", current_selection)
         .register_fn_with_ctx(CTX, "get-helix-cwd", get_helix_cwd)
+        .register_fn_with_ctx(CTX, "startup-file-args", startup_file_args)
         .register_fn_with_ctx(CTX, "move-window-far-left", move_window_to_the_left)
         .register_fn_with_ctx(CTX, "move-window-far-right", move_window_to_the_right);
 
@@ -5187,6 +5188,17 @@ pub fn get_helix_cwd(_cx: &mut Context) -> Option<String> {
         .as_os_str()
         .to_str()
         .map(|x| x.into())
+}
+
+// The file paths passed on the command line at startup (empty if none, e.g.
+// a bare `hx` that opens the default scratch buffer). Mirrors Neovim's
+// `argv()`.
+pub fn startup_file_args(cx: &mut Context) -> Vec<String> {
+    cx.editor
+        .startup_file_args
+        .iter()
+        .filter_map(|p| p.to_str().map(String::from))
+        .collect()
 }
 
 // Special newline...

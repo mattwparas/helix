@@ -99,6 +99,13 @@
 ;;Returns the current working directly that helix is using
 (define get-helix-cwd helix.static.get-helix-cwd)
 
+(provide startup-file-args)
+;;@doc
+;;Returns the list of file paths passed on the command line at startup
+;;(empty if none, e.g. a bare `hx` that opens the default scratch buffer).
+;;Mirrors Neovim's `argv()`.
+(define startup-file-args helix.static.startup-file-args)
+
 (provide move-window-far-left)
 ;;@doc
 ;;Moves the current window to the far left
