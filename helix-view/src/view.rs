@@ -474,6 +474,8 @@ impl View {
             other_inlay_hints,
             padding_before_inlay_hints,
             padding_after_inlay_hints,
+            scoped_inlay_hints,
+            scoped_inlay_hint_scopes,
         }) = doc.inlay_hints.get(&self.id)
         {
             let type_style = theme.and_then(|t| t.find_highlight("ui.virtual.inlay-hint.type"));
@@ -490,6 +492,14 @@ impl View {
                 .add_inline_annotations(parameter_inlay_hints, parameter_style)
                 .add_inline_annotations(other_inlay_hints, other_style)
                 .add_inline_annotations(padding_after_inlay_hints, None);
+
+            // Plugin-provided hints carry an explicit theme scope, resolved here
+            // so the color follows the active theme. Each is its own single-item
+            // layer (like color swatches), so no cross-hint sort is required.
+            for (annotation, scope) in scoped_inlay_hints.iter().zip(scoped_inlay_hint_scopes) {
+                let style = theme.and_then(|t| t.find_highlight(scope));
+                text_annotations.add_inline_annotations(std::slice::from_ref(annotation), style);
+            }
         };
         let config = doc.config.load();
 
