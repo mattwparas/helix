@@ -30,13 +30,15 @@ There are 2 important files you'll want, which should be auto generated during t
 * `~/.config/helix/helix.scm`
 * `~/.config/helix/init.scm`
 
-Note - these both live inside the same directory that helix sets up for runtime configurations.
+> [!NOTE]
+> Both of these live inside the same directory that helix sets up for runtime configurations.
 
 ### `helix.scm`
 
-The `helix.scm` module will be loaded first before anything else, the runtime will `require` this module, and any functions exported will now be available
-to be used as typed commands. For example:
-
+The `helix.scm` file is a steel module, that will be loaded first before
+anything else. The runtime will `require` this module, which means, that any
+functions, that are exported via `provide` will now be available to be used as
+typed commands. For example:
 
 ```scheme
 ; helix.scm
@@ -75,21 +77,27 @@ to be used as typed commands. For example:
 ;; Opens the init.scm file
 (define (open-init-scm)
   (helix.open (helix.static.get-init-scm-path)))
-  
-	
 ```
 
-Now, if you'd like to add the current file you're editing to git, simply type `:git-add` - you'll see the doc pop up with it since we've annotated the function
-with the `@doc` symbol. Hitting enter will execute the command.
+Now, if you'd like to add the current file you're editing to git, simply
+type `:git-add` - you'll see the doc pop up with it since we've annotated the
+function with a doc comment, which is `@doc` symbol. Hitting enter will execute
+the command, like with the builtin.
 
-You can also conveniently open the `helix.scm` file by using the typed command `:open-helix-scm`.
-
+You can now also conveniently open the `helix.scm` file by using the typed
+command `:open-helix-scm`.
 
 ### `init.scm`
 
-The `init.scm` file is run at the top level, immediately after the `helix.scm` module is `require`d. The helix context is available here, so you can interact with the editor.
+The `init.scm` file is run at the top level, immediately after the `helix.scm`
+module is loaded via `require`. **This means, that all of the top-level `define`s
+in this file will be available as a typed command.**
 
-The helix context is bound to the top level variable `*helix.cx*`.
+Additionally, since it is run _after_ the `helix.scm` file is `require`d you can
+use all of the exported functions from there.
+
+The helix context is available here, bound to the top level variable
+`*helix.cx*`, so you can interact with the editor.
 
 For example, if we wanted to select a random theme at startup:
 
