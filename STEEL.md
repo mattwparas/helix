@@ -39,7 +39,8 @@ to be used as typed commands. For example:
 
 
 ```scheme
-# helix.scm
+; helix.scm
+
 (require "helix/editor.scm")
 (require (prefix-in helix. "helix/commands.scm"))
 (require (prefix-in helix.static. "helix/static.scm"))
@@ -93,7 +94,7 @@ The helix context is bound to the top level variable `*helix.cx*`.
 For example, if we wanted to select a random theme at startup:
 
 ```scheme
-# init.scm
+; init.scm
 
 (require-builtin steel/random as rand::)
 (require (prefix-in helix. "helix/commands.scm"))
@@ -125,7 +126,7 @@ If you'd like to override configurations from your toml config:
 
 
 ```scheme
-# init.scm
+; init.scm
 
 (require "helix/configuration.scm")
 
@@ -141,7 +142,7 @@ If you'd like to override configurations from your toml config:
 Applying custom keybindings for certain file extensions:
 
 ```scheme
-# init.scm
+; init.scm
 
 (require "cogs/keymaps.scm")
 (require (only-in "cogs/file-tree.scm" FILE-TREE-KEYBINDINGS FILE-TREE))
@@ -161,7 +162,6 @@ Applying custom keybindings for certain file extensions:
 (merge-keybindings file-tree-base FILE-TREE-KEYBINDINGS)
 
 (set-global-buffer-or-extension-keymap (hash "scm" standard-keybindings FILE-TREE file-tree-base))
-	
 ```
 
 In insert mode, this overrides the `ret` keybinding to instead use a custom scheme indent function. Functions _must_ be available as typed commands, and are referred to
@@ -177,6 +177,8 @@ access to the documentation that will help you as you write your plugin. To conf
 `init.scm`:
 
 ```scheme
+; init.scm
+
 (require "helix/configuration.scm")
 (define-lsp "steel-language-server" (command "steel-language-server") (args '()))
 (define-language "scheme"
@@ -189,7 +191,9 @@ buffer, you can type `:eval-buffer`, or to evaluate an individual command, you c
 may need to add:
 
 ```scheme
-(require (only-in "helix/ext" evalp eval-buffer))
+; init.scm
+
+(require (only-in "helix/ext.scm" evalp eval-buffer))
 ```
 
 This brings those functions to the top level scope so that you can interact with them. You may also be keen to peruse all of the steel
