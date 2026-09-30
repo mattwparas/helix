@@ -111,19 +111,17 @@ For example, if we wanted to select a random theme at startup:
   (helix.theme (select-random options)))
 
 (randomly-pick-theme possible-themes)
-
 ```
 
 ### Libraries for helix
 
-There are a handful of extra libraries in development for extending helix, and can be found here https://github.com/mattwparas/helix-config.
+There are a handful of extra libraries in development for extending helix, and can be found here <https://github.com/mattwparas/helix-config>.
 
 If you'd like to use them, create a directory called `cogs` in your `.config/helix` directory, and copy the files in there.
 
 ### options.scm
 
 If you'd like to override configurations from your toml config:
-
 
 ```scheme
 ; init.scm
@@ -136,37 +134,60 @@ If you'd like to override configurations from your toml config:
 
 ```
 
-
 ### keymaps.scm
 
-Applying custom keybindings for certain file extensions:
+You can use the `keymap` macro provided in the `"helix/keymaps.scm"` module to
+modify your keymap, like in the example below:
 
 ```scheme
 ; init.scm
 
-(require "cogs/keymaps.scm")
-(require (only-in "cogs/file-tree.scm" FILE-TREE-KEYBINDINGS FILE-TREE))
-(require (only-in "cogs/recentf.scm" recentf-open-files get-recent-files recentf-snapshot))
+(require (only-in "helix/keymaps.scm" keymap))
 
-;; Set the global keybinding for now
-(add-global-keybinding (hash "normal" (hash "C-r" (hash "f" ":recentf-open-files"))))
-
-(define scm-keybindings (hash "insert" (hash "ret" ':scheme-indent "C-l" ':insert-lambda)))
-
-;; Grab whatever the existing keybinding map is
-(define standard-keybindings (deep-copy-global-keybindings))
-
-(define file-tree-base (deep-copy-global-keybindings))
-
-(merge-keybindings standard-keybindings scm-keybindings)
-(merge-keybindings file-tree-base FILE-TREE-KEYBINDINGS)
-
-(set-global-buffer-or-extension-keymap (hash "scm" standard-keybindings FILE-TREE file-tree-base))
+(keymap (global)
+        (normal (C-s ":w") (C-o ":open ~/.config/helix/config.toml") (g (a "code_action")))
+        (insert (A-x "normal_mode") (j (k "normal_mode"))))
 ```
 
-In insert mode, this overrides the `ret` keybinding to instead use a custom scheme indent function. Functions _must_ be available as typed commands, and are referred to
-as symbols. So in this case, the `scheme-indent` function was exported by my `helix.scm` module.
+You can also use this macro to add scheme functions to your keymap.
+This example uses the [`mattwparas/recentf.hx`](https://github.com/mattwparas/recentf.hx) cog.
 
+> [!NOTE]
+> To add scheme functions to the keymap, they must be available as typable commands.  
+> See the [`helix.scm`](#helixscm) and [`init.scm`](#initscm) sections for more info.
+
+```scheme
+; init.scm
+
+(require (only-in "helix/keymaps.scm" keymap))
+(require (only-in "cogs/recentf.scm" recentf-open-files))
+
+(keymap (global) (normal (C-r (f ":recentf-open-files"))))
+```
+
+If you want your command to show a description in the keymap menu popups,
+you will have to use an `@doc` doc comment, as explained in the [helix.scm
+section](#helixscm). The first line of the doc comment will be used.
+
+The `(global)` specifier specifies the scope in which the keymap is active, in
+this case always.
+
+In addition to the `(global)` specifier, there are two more: `(extension
+"...")` and `(buffer "...")`, which make the keybindings only apply to specific
+extensions or buffers, respectively.
+
+```scheme
+; init.scm
+
+(require (only-in "helix/keymaps.scm" keymap))
+
+(keymap (extension ".scm") (insert (ret ":scheme-indent") (C-l ":insert-lambda")))
+```
+
+This will override the `ret` keybinding in insert mode in `.scm` files to
+instead use a custom scheme indent function.  
+In this case the `scheme-indent` and the `insert-lambda` functions are defined
+and exported in the `helix.scm` module.
 
 ## Writing a plugin
 
@@ -198,7 +219,6 @@ may need to add:
 
 This brings those functions to the top level scope so that you can interact with them. You may also be keen to peruse all of the steel
 functions and modules available. Those can be found in `steel-docs.md`.
-
 
 ### Command API
 
@@ -238,14 +258,12 @@ is complete. The future will get scheduled on to the helix event loop, so the UI
 Another way we can accomplish this is with native threads. Steel supports native threads, which means we can spawn a function
 off on to another thread to run some code. Consider the following example which won't work:
 
-
 ```scheme
 (spawn-native-thread (lambda () (time/sleep-ms 1000) (theme "focus_nova"))) ;; Note, this won't work!
 ```
 
 This appears to spawn a thread, sleep for 1 second, and then change the theme. The issue here is that this thread does not
 have control over the helix context. So what we'll have to do instead, is schedule a function to be run on the main thread:
-
 
 ```scheme
 (require "helix/ext.scm")
@@ -262,7 +280,6 @@ have control over the helix context. So what we'll have to do instead, is schedu
 `hx.block-on-task` will check if we're running on the main thread. If we are already, it doesn't do anything - but otherwise,
 it enqueues a callback that schedules itself onto the main thread, and waits till it can acquire the helix context. The function
 is then run, and the value returned back to this thread of control.
-
 
 There is also `hx.with-context` which does a similar thing, except it does _not_ block the current thread.
 
