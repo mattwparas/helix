@@ -332,3 +332,33 @@
 ;; pattern : string?
 ;; input-list : (list? string?)
 (define fuzzy-match helix.fuzzy-match)
+
+(provide steel-mode)
+;;@doc
+;;Returns the active Steel mode name, or #false if no Steel mode is active.
+(define steel-mode helix.steel-mode)
+
+(provide set-steel-mode!)
+;;@doc
+;;Set the active Steel mode by name. The name is shown in the statusline.
+;;Use register-steel-mode-keymap! to bind keys for the mode.
+(define set-steel-mode! helix.set-steel-mode!)
+
+(provide unset-steel-mode!)
+;;@doc
+;;Clear the active Steel mode.
+(define unset-steel-mode! helix.unset-steel-mode!)
+
+(provide register-steel-mode-keymap!)
+;;@doc
+;;Register a keymap for a named Steel mode. The keymap takes priority over
+;;the default helix keybindings when that mode is active.
+;;
+;;```scheme
+;;(register-steel-mode-keymap! name keymap)
+;;```
+;;
+;;name : string?
+;;keymap : keymap?
+(define (register-steel-mode-keymap! name keymap)
+  (helix.register-steel-mode-keymap! name (value->jsexpr-string keymap)))
