@@ -93,6 +93,14 @@ steel-doc = { git = "https://github.com/mattwparas/steel.git", optional = true }
 globset = "0.4.16"
 dashmap = "6.2"
 
+# terminal buffers: PTY spawning/IO + ANSI/VT parsing into a screen grid
+portable-pty = "0.9"
+vt100 = "0.15"
+# same VTE parser vt100 uses internally; used directly to detect terminal
+# capability queries (DA/DSR) vt100 itself silently drops, so we can answer
+# them instead of leaving the child program waiting on a reply that never comes
+vte = "0.11"
+
 parking_lot.workspace = true
 
 [target.'cfg(windows)'.dependencies]

@@ -195,11 +195,35 @@ where
 {
     let visible = context.focused;
     let config = context.editor.config();
+
+    if visible {
+        if let Some(name) = context.editor.steel_mode.clone() {
+            let style = if config.color_modes {
+                context.editor.theme.get("ui.statusline.select")
+            } else {
+                Style::default()
+            };
+            write(context, Span::styled(format!(" {} ", name), style));
+            return;
+        }
+    }
+
+    let mode = context.editor.mode();
+    // A terminal buffer's "Insert" mode is really passthrough to the child
+    // process, not text editing — Neovim distinguishes this with its own
+    // "Terminal" mode label, so mirror that here rather than showing the
+    // same INS a real text buffer would.
+    let is_terminal_insert = mode == Mode::Insert && crate::term_pty::is_terminal(context.doc_id);
+
     let modenames = &config.statusline.mode;
-    let mode_str = match context.editor.mode() {
-        Mode::Insert => &modenames.insert,
-        Mode::Select => &modenames.select,
-        Mode::Normal => &modenames.normal,
+    let mode_str = if is_terminal_insert {
+        "TERM"
+    } else {
+        match mode {
+            Mode::Insert => &modenames.insert,
+            Mode::Select => &modenames.select,
+            Mode::Normal => &modenames.normal,
+        }
     };
     let content = if visible {
         format!(" {mode_str} ")
@@ -208,7 +232,7 @@ where
         " ".repeat(mode_str.width() + 2)
     };
     let style = if visible && config.color_modes {
-        match context.editor.mode() {
+        match mode {
             Mode::Insert => context.editor.theme.get("ui.statusline.insert"),
             Mode::Select => context.editor.theme.get("ui.statusline.select"),
             Mode::Normal => context.editor.theme.get("ui.statusline.normal"),
@@ -486,10 +510,13 @@ where
 {
     let doc = get_doc(context);
     let title = {
-        let rel_path = doc.relative_path();
-        let path = rel_path
+        // A plugin-set short label (e.g. "ours"/"theirs" for a merge-conflict
+        // side pane) always wins when set, matching the bufferline tab.
+        let path = doc
+            .bufferline_name
             .as_ref()
-            .map(|p| p.to_string_lossy())
+            .map(|n| n.into())
+            .or_else(|| doc.relative_path().as_ref().map(|p| p.to_string_lossy()))
             .or_else(|| doc.name.as_ref().map(|x| x.into()))
             .unwrap_or_else(|| SCRATCH_BUFFER_NAME.into());
         format!(" {} ", path)
@@ -544,10 +571,15 @@ where
 {
     let doc = get_doc(context);
     let title = {
-        let rel_path = doc.relative_path();
-        let path = rel_path
+        let path = doc
+            .bufferline_name
             .as_ref()
-            .and_then(|p| p.file_name().map(|s| s.to_string_lossy()))
+            .map(|n| n.into())
+            .or_else(|| {
+                doc.relative_path()
+                    .as_ref()
+                    .and_then(|p| p.file_name().map(|s| s.to_string_lossy()))
+            })
             .or_else(|| doc.name.as_ref().map(|x| x.into()))
             .unwrap_or_else(|| SCRATCH_BUFFER_NAME.into());
         format!(" {} ", path)
