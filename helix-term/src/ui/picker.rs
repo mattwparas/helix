@@ -80,6 +80,16 @@ impl From<DocumentId> for PathOrId<'_> {
 
 type FileCallback<T> = Box<dyn for<'a> Fn(&'a Editor, &'a T) -> Option<FileLocation<'a>>>;
 
+type ComponentCallback<T> = Box<dyn Fn(&Editor, &T) -> Option<Box<dyn Component>>>;
+
+/// A preview drawn by a component built for the selected item.
+struct ComponentPreview<T> {
+    build: ComponentCallback<T>,
+    /// The component for the item at this address, which is stable while the item is in the
+    /// matcher.
+    cached: Option<(usize, Option<Box<dyn Component>>)>,
+}
+
 /// File path and range of lines (used to align and highlight lines)
 pub type FileLocation<'a> = (PathOrId<'a>, Option<(usize, usize)>);
 
@@ -266,6 +276,9 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     read_buffer: Vec<u8>,
     /// Given an item in the picker, return the file path and line number to display.
     file_fn: Option<FileCallback<T>>,
+    /// Given an item in the picker, return a component to draw as its preview. Takes the place
+    /// of `file_fn`.
+    component_preview: Option<ComponentPreview<T>>,
     /// An event handler for syntax highlighting the currently previewed file.
     preview_highlight_handler: Sender<Arc<Path>>,
     dynamic_query_handler: Option<Sender<DynamicQueryChange>>,
@@ -392,6 +405,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             preview_cache: HashMap::new(),
             read_buffer: Vec::with_capacity(1024),
             file_fn: None,
+            component_preview: None,
             preview_highlight_handler: PreviewHighlightHandler::<T, D>::default().spawn(),
             dynamic_query_handler: None,
         }
@@ -422,6 +436,23 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         // not true this could be a separate builder function
         self.matcher.update_config(Config::DEFAULT.match_paths());
         self
+    }
+
+    /// Preview the selected item with the component `preview_fn` builds for it, such as
+    /// [`ui::Markdown`]. The component is built again only when the selection changes.
+    pub fn with_component_preview(
+        mut self,
+        preview_fn: impl Fn(&Editor, &T) -> Option<Box<dyn Component>> + 'static,
+    ) -> Self {
+        self.component_preview = Some(ComponentPreview {
+            build: Box::new(preview_fn),
+            cached: None,
+        });
+        self
+    }
+
+    fn has_preview(&self) -> bool {
+        self.file_fn.is_some() || self.component_preview.is_some()
     }
 
     pub fn with_history_register(mut self, history_register: Option<char>) -> Self {
@@ -896,6 +927,11 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         let inner = inner.inner(margin);
         BLOCK.render(area, surface);
 
+        if self.component_preview.is_some() {
+            self.render_component_preview(inner, surface, cx);
+            return;
+        }
+
         if let Some((preview, range)) = self.get_preview(cx.editor) {
             let doc = match preview.document() {
                 Some(doc)
@@ -1021,6 +1057,24 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             );
         }
     }
+
+    fn render_component_preview(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
+        let Some(item) = self.selection() else {
+            return;
+        };
+        let key = item as *const T as usize;
+        let preview = self.component_preview.as_ref().unwrap();
+
+        // Build the component only when the selected item changed.
+        if preview.cached.as_ref().map(|(cached, _)| *cached) != Some(key) {
+            let component = (preview.build)(cx.editor, item);
+            self.component_preview.as_mut().unwrap().cached = Some((key, component));
+        }
+
+        if let Some((_, Some(component))) = &mut self.component_preview.as_mut().unwrap().cached {
+            component.render(area, surface, cx);
+        }
+    }
 }
 
 impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I, D> {
@@ -1033,7 +1087,7 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
         // +---------+ +---------+
 
         let render_preview =
-            self.show_preview && self.file_fn.is_some() && area.width > MIN_AREA_WIDTH_FOR_PREVIEW;
+            self.show_preview && self.has_preview() && area.width > MIN_AREA_WIDTH_FOR_PREVIEW;
 
         let picker_width = if render_preview {
             area.width / 2
@@ -1178,7 +1232,7 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
 
         // prompt area
         let render_preview =
-            self.show_preview && self.file_fn.is_some() && area.width > MIN_AREA_WIDTH_FOR_PREVIEW;
+            self.show_preview && self.has_preview() && area.width > MIN_AREA_WIDTH_FOR_PREVIEW;
 
         let picker_width = if render_preview {
             area.width / 2

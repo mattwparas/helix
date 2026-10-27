@@ -3739,6 +3739,7 @@ fn configure_lsp_globals() {
         "prompt",
         "picker",
         "#%exp-picker",
+        "#%exp-table-picker",
         "Component::Text",
         "hx.create-directory",
     ];
@@ -4541,6 +4542,9 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
         },
     );
 
+    // Experimental - use at your own risk.
+    engine.register_fn("#%exp-table-picker", table_picker);
+
     engine.register_fn("Component::Text", |contents: String| WrappedDynComponent {
         inner: Some(Box::new(crate::ui::Text::new(contents))),
     });
@@ -4551,6 +4555,119 @@ fn configure_engine_impl(mut engine: Engine) -> Engine {
     GLOBAL_OFFSET.store(engine.globals().len(), Ordering::Relaxed);
 
     engine
+}
+
+/// A row of `#%exp-table-picker`: its position in the rows given, one cell per
+/// column, and the markdown shown as its preview.
+struct TablePickerRow {
+    index: usize,
+    cells: Vec<String>,
+    preview: String,
+}
+
+fn table_picker_cell<'a, const I: usize>(
+    row: &'a TablePickerRow,
+    _: &'a (),
+) -> tui::widgets::Cell<'a> {
+    row.cells
+        .get(I)
+        .map(String::as_str)
+        .unwrap_or_default()
+        .into()
+}
+
+/// Column formatters by column index; picker columns take function pointers, not closures.
+const TABLE_PICKER_CELLS: [for<'a> fn(&'a TablePickerRow, &'a ()) -> tui::widgets::Cell<'a>; 16] = [
+    table_picker_cell::<0>,
+    table_picker_cell::<1>,
+    table_picker_cell::<2>,
+    table_picker_cell::<3>,
+    table_picker_cell::<4>,
+    table_picker_cell::<5>,
+    table_picker_cell::<6>,
+    table_picker_cell::<7>,
+    table_picker_cell::<8>,
+    table_picker_cell::<9>,
+    table_picker_cell::<10>,
+    table_picker_cell::<11>,
+    table_picker_cell::<12>,
+    table_picker_cell::<13>,
+    table_picker_cell::<14>,
+    table_picker_cell::<15>,
+];
+
+/// Picker over `rows`, each a list of cells matching `column-names`, with the
+/// matching entry of `previews` rendered as markdown beside the selected row.
+/// Unprefixed query terms match column `primary-column`. Selecting a row calls
+/// `callback` with its index in `rows`.
+fn table_picker(
+    column_names: Vec<String>,
+    primary_column: usize,
+    rows: Vec<Vec<String>>,
+    previews: Vec<String>,
+    callback_fn: SteelVal,
+) -> steel::rvals::Result<WrappedDynComponent> {
+    if column_names.is_empty() || column_names.len() > TABLE_PICKER_CELLS.len() {
+        steel::stop!(Generic => "table picker: expected 1 to {} columns, got {}", TABLE_PICKER_CELLS.len(), column_names.len());
+    }
+    if primary_column >= column_names.len() {
+        steel::stop!(Generic => "table picker: primary column {} out of range", primary_column);
+    }
+    if previews.len() != rows.len() {
+        steel::stop!(Generic => "table picker: {} rows but {} previews", rows.len(), previews.len());
+    }
+
+    let columns = column_names
+        .into_iter()
+        .zip(TABLE_PICKER_CELLS)
+        .map(|(name, format)| PickerColumn::new(name, format));
+    let rooted = callback_fn.as_rooted();
+
+    let picker = ui::Picker::new(
+        columns,
+        primary_column,
+        rows.into_iter()
+            .zip(previews)
+            .enumerate()
+            .map(|(index, (cells, preview))| TablePickerRow {
+                index,
+                cells,
+                preview,
+            }),
+        (),
+        move |cx, row: &TablePickerRow, _action| {
+            let index = row.index;
+            with_ephemeral_context(cx, |ctx| {
+                let cloned_func = rooted.value();
+                enter_engine(|guard| {
+                    if let Err(e) = guard
+                        .with_mut_reference::<Context, Context>(ctx)
+                        .consume_once(move |engine, args| {
+                            let context = args.into_iter().next().unwrap();
+                            engine.update_value(CTX, context);
+                            engine.call_function_with_args(
+                                cloned_func.clone(),
+                                vec![SteelVal::IntV(index as isize)],
+                            )
+                        })
+                    {
+                        present_error_inside_engine_context(ctx, guard, e);
+                    }
+                });
+            })
+        },
+    )
+    .truncate_start(false)
+    .with_component_preview(|editor, row: &TablePickerRow| {
+        Some(Box::new(ui::Markdown::new(
+            row.preview.clone(),
+            editor.syn_loader.clone(),
+        )))
+    });
+
+    Ok(WrappedDynComponent {
+        inner: Some(Box::new(ui::overlay::overlaid(picker))),
+    })
 }
 
 fn make_ephemeral_context<'a, 'b>(cx: &'a mut compositor::Context<'b>) -> Context<'a> {
