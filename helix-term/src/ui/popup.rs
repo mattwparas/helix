@@ -193,9 +193,10 @@ impl<T: Component> Popup<T> {
         if render_borders {
             width += 2;
         }
-        if viewport.width <= rel_x + width + 2 {
-            rel_x = viewport.width.saturating_sub(width + 2);
-            width = viewport.width.saturating_sub(rel_x + 2)
+        // clamp the popup to [viewport.x, viewport.right()]
+        if viewport.right() <= rel_x + width + 2 {
+            rel_x = viewport.right().saturating_sub(width + 2).max(viewport.x);
+            width = viewport.right().saturating_sub(rel_x + 2)
         }
 
         let area = match final_pos {
