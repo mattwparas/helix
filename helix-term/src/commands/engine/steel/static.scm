@@ -43,6 +43,118 @@
 ;;Replace the existing selection with the given string
 (define replace-selection-with helix.static.replace-selection-with)
 
+(provide buffer-set-text!)
+;;@doc
+;;Replace the entire contents of the current buffer with `text`. The new content
+;;is diffed against the existing buffer so undo history stays a single coherent
+;;step and unrelated state (selections, diagnostics) is only remapped, not reset.
+;;
+;;```scheme
+;;(buffer-set-text! text) -> void?
+;;```
+(define buffer-set-text! helix.static.buffer-set-text!)
+
+(provide buffer-mark-saved!)
+;;@doc
+;;Mark the current buffer as saved at its current revision, without writing
+;;anything to disk. Used to clear the modified indicator after a
+;;`document-will-save` hook has taken over a save itself.
+;;
+;;```scheme
+;;(buffer-mark-saved!) -> void?
+;;```
+(define buffer-mark-saved! helix.static.buffer-mark-saved!)
+
+(provide term-buffer-spawn!)
+;;@doc
+;;Spawn `command` (run as `$SHELL -c command`, so `cd dir && exec prog`
+;;style chaining works) as a new terminal buffer. The buffer's rope is kept
+;;live-synced to the child process's PTY output — it's a real `Document`,
+;;so bufferline, splits, and buffer-next/previous all work on it for free.
+;;Returns the new buffer's doc-id.
+;;
+;;The buffer isn't switched to immediately: it's revealed (replacing the
+;;current view's document, same as `term-buffer-spawn!` used to do right
+;;away) the moment the child process produces its first real output,
+;;rather than flashing an empty buffer during its own startup latency
+;;(shell fork/exec, then its own init). Because of this, the returned
+;;doc-id is *not* the current buffer yet — use `document-set-bufferline-name!`
+;;with it directly rather than `set-bufferline-name!`, which only affects
+;;whatever buffer is current right now.
+;;
+;;`$SHELL` isn't always bash/POSIX-sh — if `command` uses syntax that
+;;isn't portable across shells (e.g. `(...)` subshell grouping, which
+;;fish doesn't understand the same way), use `term-buffer-spawn-with-shell!`
+;;to pin an explicit interpreter instead of gambling on the user's login
+;;shell.
+;;
+;;The buffer closes itself automatically when the child process exits (see
+;;the `document-closed` hook); use `term-buffer-alive?` to check whether
+;;that has already happened.
+;;
+;;```scheme
+;;(term-buffer-spawn! command) -> doc-id?
+;;
+;;command : string?
+;;```
+(define term-buffer-spawn! helix.static.term-buffer-spawn!)
+
+(provide term-buffer-spawn-with-shell!)
+;;@doc
+;;Same as `term-buffer-spawn!`, but running `command` under an explicitly
+;;chosen shell instead of `$SHELL`.
+;;
+;;```scheme
+;;(term-buffer-spawn-with-shell! command shell) -> doc-id?
+;;
+;;command : string?
+;;shell : string?
+;;```
+(define term-buffer-spawn-with-shell! helix.static.term-buffer-spawn-with-shell!)
+
+(provide term-buffer-send!)
+;;@doc
+;;Write raw text to a terminal buffer's child process stdin. No implicit
+;;newline is appended — include `\r` yourself if you want one, same as a
+;;real keypress would send. No-op if `doc-id` isn't a running terminal
+;;buffer (e.g. the process already exited).
+;;
+;;```scheme
+;;(term-buffer-send! doc-id text) -> void?
+;;
+;;doc-id : doc-id?
+;;text : string?
+;;```
+(define term-buffer-send! helix.static.term-buffer-send!)
+
+(provide term-buffer-alive?)
+;;@doc
+;;Whether `doc-id` is a still-running terminal buffer created with
+;;`term-buffer-spawn!`. Becomes `#false` the moment the child process
+;;exits, not just when the buffer is closed some other way — a terminal
+;;buffer always closes itself as soon as this would go false.
+;;
+;;```scheme
+;;(term-buffer-alive? doc-id) -> bool?
+;;
+;;doc-id : doc-id?
+;;```
+(define term-buffer-alive? helix.static.term-buffer-alive?)
+
+(provide term-buffer-hide-gutter!)
+;;@doc
+;;Whether terminal buffers hide the line-number gutter. Defaults to `#true`
+;;— a full-width blank/loading terminal reads as "a terminal", whereas one
+;;with Helix's usual gutter furniture reads as "an empty file". Affects
+;;every terminal buffer, not a specific one.
+;;
+;;```scheme
+;;(term-buffer-hide-gutter! hide) -> void?
+;;
+;;hide : bool?
+;;```
+(define term-buffer-hide-gutter! helix.static.term-buffer-hide-gutter!)
+
 (provide enqueue-expression-in-engine)
 ;;@doc
 ;;Enqueue an expression to run at the top level context,

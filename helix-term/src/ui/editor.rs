@@ -5,6 +5,7 @@ use crate::{
     handlers::completion::CompletionItem,
     key,
     keymap::{KeymapResult, Keymaps},
+    term_pty,
     ui::{
         document::{render_document, LinePos, TextRenderer},
         statusline,
@@ -29,9 +30,10 @@ use helix_view::{
     graphics::{Color, CursorKind, Modifier, Rect, Style},
     input::{KeyEvent, MouseButton, MouseEvent, MouseEventKind},
     keyboard::{KeyCode, KeyModifiers},
+    tree::Direction as SplitDirection,
     Document, DocumentId, Editor, Theme, View, ViewId,
 };
-use std::{mem::take, num::NonZeroUsize, ops, path::PathBuf, rc::Rc};
+use std::{mem::take, num::NonZeroUsize, ops, rc::Rc};
 
 use tui::{buffer::Buffer as Surface, text::Span};
 
@@ -44,6 +46,10 @@ pub struct EditorView {
     spinners: ProgressSpinners,
     /// Tracks if the terminal window is focused by reaction to terminal focus events
     terminal_focused: bool,
+    /// Set after a `<C-\>` while a terminal buffer has input focus: the next
+    /// key decides whether this detaches to Normal mode (`<C-n>`) or was just
+    /// a literal `<C-\>` meant for the child process (anything else).
+    terminal_detach_pending: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +73,7 @@ impl EditorView {
             completion: None,
             spinners: ProgressSpinners::default(),
             terminal_focused: true,
+            terminal_detach_pending: false,
         }
     }
 
@@ -88,7 +95,27 @@ impl EditorView {
         {
             let editor = &cx.editor;
 
-            let inner = view.inner_area(doc);
+            // A full-width blank/loading terminal reads as "a terminal";
+            // Helix's usual line-number gutter on top of it reads as "an
+            // empty file" — skip reserving that column at all for terminal
+            // buffers (configurable via term-buffer-hide-gutter!).
+            let hide_gutter = term_pty::is_terminal(doc_id) && term_pty::hide_gutter();
+            let inner = if hide_gutter {
+                view.area.clip_bottom(1) // still leave room for the statusline
+            } else {
+                view.inner_area(doc)
+            };
+            // Only the focused view drives the pty's size: a terminal buffer
+            // split into two views can't have two sizes, and resizing from
+            // whichever view happened to render last would fight itself.
+            if is_focused {
+                if let Some(session) = term_pty::get(doc_id) {
+                    // See the matching comment in `terminal_new` (typed.rs):
+                    // one column of slack so a full-width pty line doesn't
+                    // sit exactly on Helix's soft-wrap boundary.
+                    session.resize(inner.height, inner.width.saturating_sub(1));
+                }
+            }
             let area = view.area;
             let theme = &editor.theme;
             let config = editor.config();
@@ -153,6 +180,7 @@ impl EditorView {
             }
 
             Self::doc_diagnostics_highlights_into(doc, theme, &mut overlays);
+            overlays.extend(Self::doc_script_highlights(doc, theme));
 
             if is_focused {
                 if config.lsp.auto_document_highlight {
@@ -170,6 +198,10 @@ impl EditorView {
                     theme,
                     &config.cursor_shape,
                     self.terminal_focused,
+                    // A real terminal's cursor is always a solid block,
+                    // independent of whatever cursor shape the user
+                    // configured for Insert mode generally.
+                    term_pty::is_terminal(doc_id),
                 ));
                 if let Some(overlay) = Self::highlight_focused_view_elements(view, doc, theme) {
                     overlays.push(overlay);
@@ -177,7 +209,7 @@ impl EditorView {
             }
 
             let gutter_overflow = view.gutter_offset(doc) == 0;
-            if !gutter_overflow {
+            if !gutter_overflow && !hide_gutter {
                 Self::render_gutter(
                     editor,
                     doc,
@@ -226,6 +258,29 @@ impl EditorView {
                 theme,
                 decorations,
             );
+
+            // Recolor terminal buffer cells to match the child program's SGR
+            // output (colors, bold/italic/underline). This has to run *after*
+            // `render_document` rather than through a `Decoration`: normal
+            // text drawing always sets an explicit foreground color, which
+            // would stomp a foreground color set beforehand via a decoration
+            // (background/modifiers survive that since they're usually left
+            // unset, which is what made this easy to miss before checking).
+            if let Some(session) = term_pty::get(doc_id) {
+                let text = doc.text().slice(..);
+                let first_line = text.char_to_line(view_offset.anchor.min(text.len_chars()));
+                for y in 0..inner.height {
+                    let doc_line = first_line + y as usize;
+                    if doc_line >= text.len_lines() {
+                        break;
+                    }
+                    for col in 0..inner.width {
+                        if let Some(style) = session.cell_style(doc_line as u16, col) {
+                            surface[(inner.x + col, inner.y + y)].set_style(style);
+                        }
+                    }
+                }
+            }
 
             // if we're not at the edge of the screen, draw a right border
             if viewport.right() != view.area.right() {
@@ -552,13 +607,14 @@ impl EditorView {
         theme: &Theme,
         cursor_shape_config: &CursorShapeConfig,
         is_terminal_focused: bool,
+        force_block_cursor: bool,
     ) -> OverlayHighlights {
         let text = doc.text().slice(..);
         let selection = doc.selection(view.id);
         let primary_idx = selection.primary_index();
 
         let cursorkind = cursor_shape_config.from_mode(mode);
-        let cursor_is_block = cursorkind == CursorKind::Block;
+        let cursor_is_block = force_block_cursor || cursorkind == CursorKind::Block;
 
         let selection_scope = theme
             .find_highlight_exact("ui.selection")
@@ -666,6 +722,19 @@ impl EditorView {
         Some(OverlayHighlights::single(highlight, pos..pos + 1))
     }
 
+    pub fn doc_script_highlights(doc: &Document, theme: &Theme) -> Vec<OverlayHighlights> {
+        doc.script_highlights()
+            .values()
+            .filter_map(|group| {
+                let highlight = theme.find_highlight(&group.scope)?;
+                Some(OverlayHighlights::Homogeneous {
+                    highlight,
+                    ranges: group.ranges.clone(),
+                })
+            })
+            .collect()
+    }
+
     pub fn tabstop_highlights(doc: &Document, theme: &Theme) -> Option<OverlayHighlights> {
         let snippet = doc.active_snippet.as_ref()?;
         let highlight = theme.find_highlight_exact("tabstop")?;
@@ -678,7 +747,6 @@ impl EditorView {
 
     /// Render bufferline at the top
     pub fn render_bufferline(editor: &Editor, viewport: Rect, surface: &mut Surface) {
-        let scratch = PathBuf::from(SCRATCH_BUFFER_NAME); // default filename to use for scratch buffer
         surface.clear_with(
             viewport,
             editor
@@ -701,13 +769,22 @@ impl EditorView {
         let current_doc = view!(editor).doc;
 
         for doc in editor.documents() {
-            let fname = doc
-                .path()
-                .unwrap_or(&scratch)
-                .file_name()
-                .unwrap_or_default()
-                .to_str()
-                .unwrap_or_default();
+            // A plugin-set short tab label (e.g. "oil" for a file-manager
+            // buffer, or "ours"/"theirs" for a merge-conflict side pane)
+            // always wins when set, even over a real path - a plugin asking
+            // for a specific label is intentionally relabeling the tab, not
+            // just filling in a gap left by a pathless scratch buffer.
+            let fname = match doc.bufferline_name.as_deref() {
+                Some(name) => name,
+                None => match doc.path() {
+                    Some(path) => path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_str()
+                        .unwrap_or_default(),
+                    None => SCRATCH_BUFFER_NAME,
+                },
+            };
 
             let style = if current_doc == doc.id() {
                 bufferline_active
@@ -1028,6 +1105,83 @@ impl EditorView {
                 }
                 _ => unreachable!(),
             }
+        }
+    }
+
+    /// Route a key typed while a terminal buffer has insert-mode focus to the
+    /// child process, bypassing the normal insert-mode keymap entirely (a
+    /// user's Insert-mode remaps, e.g. `jj` -> escape, must not eat keystrokes
+    /// meant for the shell). Two ways to detach back to Normal mode:
+    ///
+    /// - `<F12>` on its own: a single press, always available. Function keys
+    ///   decode the same way across every input backend we've seen, unlike
+    ///   `<C-\>` below, and no real terminal program binds F12, so it's safe
+    ///   to intercept unconditionally.
+    /// - `<C-\><C-n>`, the same chord Neovim uses for terminal-job mode, kept
+    ///   for muscle memory. Less reliable: different input backends report
+    ///   `<C-\>` differently (this build's reports it as `Char('4')`, the
+    ///   legacy ASCII-control-table reading of FS/0x1c, not `Char('\\')`) —
+    ///   if a given terminal reports it some third way we haven't seen, this
+    ///   chord silently won't fire, which is exactly why F12 exists as a
+    ///   backstop that doesn't depend on guessing key-decoding quirks.
+    ///
+    /// `<C-h/j/k/l>` jump to the adjacent split and detach to Normal mode
+    /// (same as F12, plus moving focus) instead of forwarding to the child
+    /// process — requested to match tmux/vim-style pane navigation muscle
+    /// memory. Trade-off worth knowing: `<C-h>` and `<C-j>` are also the
+    /// literal Backspace/Linefeed control bytes some shells and REPLs rely
+    /// on (e.g. a `stty erase ^H` setup, or a multi-line REPL using `<C-j>`
+    /// for a literal newline) — those no longer reach the child from inside
+    /// a terminal buffer.
+    fn handle_terminal_key(
+        &mut self,
+        cx: &mut commands::Context,
+        session: &term_pty::PtySession,
+        key: KeyEvent,
+    ) {
+        if key.code == KeyCode::F(12) && key.modifiers.is_empty() {
+            self.terminal_detach_pending = false;
+            cx.editor.mode = Mode::Normal;
+            return;
+        }
+
+        if key.modifiers == KeyModifiers::CONTROL {
+            let split_direction = match key.code {
+                KeyCode::Char('h') => Some(SplitDirection::Left),
+                KeyCode::Char('j') => Some(SplitDirection::Down),
+                KeyCode::Char('k') => Some(SplitDirection::Up),
+                KeyCode::Char('l') => Some(SplitDirection::Right),
+                _ => None,
+            };
+            if let Some(direction) = split_direction {
+                self.terminal_detach_pending = false;
+                cx.editor.mode = Mode::Normal;
+                cx.editor.focus_direction(direction);
+                return;
+            }
+        }
+
+        let is_detach_prefix = matches!(key.code, KeyCode::Char('\\') | KeyCode::Char('4'))
+            && key.modifiers == KeyModifiers::CONTROL;
+        let is_detach_confirm =
+            key.code == KeyCode::Char('n') && key.modifiers == KeyModifiers::CONTROL;
+
+        if self.terminal_detach_pending {
+            self.terminal_detach_pending = false;
+            if is_detach_confirm {
+                cx.editor.mode = Mode::Normal;
+                return;
+            }
+            // Not actually a detach sequence: the buffered `<C-\>` was meant
+            // for the child process, so send it before handling this key.
+            session.write_input(&[0x1c]);
+        } else if is_detach_prefix {
+            self.terminal_detach_pending = true;
+            return;
+        }
+
+        if let Some(bytes) = term_pty::encode_key(&key, session.application_cursor()) {
+            session.write_input(&bytes);
         }
     }
 
@@ -1517,8 +1671,17 @@ impl Component for EditorView {
                 let mode = cx.editor.mode();
 
                 if !self.on_next_key(OnKeyCallbackKind::PseudoPending, &mut cx, key) {
-                    match mode {
-                        Mode::Insert => {
+                    let terminal_session = if mode == Mode::Insert {
+                        term_pty::get(current!(cx.editor).1.id())
+                    } else {
+                        None
+                    };
+
+                    match (mode, terminal_session) {
+                        (Mode::Insert, Some(session)) => {
+                            self.handle_terminal_key(&mut cx, &session, key);
+                        }
+                        (Mode::Insert, None) => {
                             // let completion swallow the event if necessary
                             let mut consumed = false;
                             if let Some(completion) = &mut self.completion {
@@ -1568,7 +1731,7 @@ impl Component for EditorView {
                                 self.last_insert.1.push(InsertEvent::Key(key));
                             }
                         }
-                        mode => self.command_mode(mode, &mut cx, key),
+                        (mode, _) => self.command_mode(mode, &mut cx, key),
                     }
                 }
 
@@ -1591,11 +1754,29 @@ impl Component for EditorView {
                 let mode = cx.editor.mode();
                 let (view, doc) = current!(cx.editor);
 
-                view.ensure_cursor_in_view(doc, config.scrolloff);
+                // A terminal buffer always shows the vt100 grid from row 0 —
+                // "scroll to keep the cursor in view with scrolloff padding"
+                // is a text-buffer concept that doesn't apply and actively
+                // fights `refresh_document`'s cursor-position sync, which
+                // moves the selection to wherever the child program's
+                // cursor is (anywhere on screen) on basically every render.
+                if !term_pty::is_terminal(doc.id()) {
+                    view.ensure_cursor_in_view(doc, config.scrolloff);
+                }
 
                 // Store a history state if not in insert mode. This also takes care of
                 // committing changes when leaving insert mode.
-                if mode != Mode::Insert {
+                //
+                // Skipped for terminal buffers: their content changes every
+                // frame from `refresh_document`, not from user edits, so
+                // committing it here would both pollute undo with per-frame
+                // screen diffs and (since it advances the history revision
+                // counter) make `is_modified` report `true` forever after
+                // the next keypress that reaches this far in Normal mode
+                // (e.g. the `<F12>` that detaches from it) — `discard_pending_changes`
+                // in `term_pty::refresh_document` is what's meant to keep it
+                // clean instead.
+                if mode != Mode::Insert && !term_pty::is_terminal(doc.id()) {
                     doc.append_changes_to_history(view);
                 }
                 let callback = if callbacks.is_empty() {
@@ -1680,11 +1861,14 @@ impl Component for EditorView {
             Self::render_bufferline(cx.editor, area.with_height(1), surface);
         }
 
+        let suppress_cursor = cx.editor.steel_terminal_has_focus;
         let views: Vec<(ViewId, bool)> = {
             cx.editor
                 .tree
                 .views()
-                .map(|(view, is_focused)| (view.id, is_focused))
+                .map(|(view, is_focused)| {
+                    (view.id, if suppress_cursor { false } else { is_focused })
+                })
                 .collect()
         };
         for (view_id, is_focused) in views {
@@ -1787,17 +1971,22 @@ impl Component for EditorView {
     }
 
     fn cursor(&self, _area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {
-        match editor.cursor() {
-            // all block cursors are drawn manually
-            (pos, CursorKind::Block) => {
-                if self.terminal_focused {
-                    (pos, CursorKind::Hidden)
-                } else {
-                    // use terminal cursor when terminal loses focus
-                    (pos, CursorKind::Underline)
-                }
+        let (_, doc) = current_ref!(editor);
+        let is_terminal_doc = term_pty::is_terminal(doc.id());
+        let (pos, kind) = editor.cursor();
+        // All block cursors are drawn manually — and so is a terminal
+        // buffer's cursor unconditionally, regardless of the shape
+        // configured for Insert mode generally (see the matching
+        // `force_block_cursor` in `doc_selection_highlights`).
+        if kind == CursorKind::Block || is_terminal_doc {
+            if self.terminal_focused {
+                (pos, CursorKind::Hidden)
+            } else {
+                // use terminal cursor when terminal loses focus
+                (pos, CursorKind::Underline)
             }
-            cursor => cursor,
+        } else {
+            (pos, kind)
         }
     }
 }

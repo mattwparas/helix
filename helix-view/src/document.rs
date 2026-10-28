@@ -153,6 +153,8 @@ pub struct Document {
     pub(crate) jump_labels: HashMap<ViewId, Vec<Overlay>>,
     /// LSP document highlights for each view, stored as char ranges.
     pub(crate) document_highlights: HashMap<ViewId, DocumentHighlights>,
+    /// Script-defined highlight groups, keyed by namespace string.
+    pub(crate) script_highlights: HashMap<String, ScriptHighlightGroup>,
     /// LSP code action hints for each view.
     pub(crate) code_action_hints: HashSet<ViewId>,
     /// Set to `true` when the document is updated, reset to `false` on the next inlay hints
@@ -214,7 +216,37 @@ pub struct Document {
 
     // A name separate from the file name
     pub name: Option<String>,
+    // A short label for the bufferline tab, separate from both the file name
+    // and `name` above (which can be long - e.g. a full directory path - and
+    // is meant for the statusline, not a narrow tab).
+    pub bufferline_name: Option<String>,
     pub readonly: bool,
+    /// Whether this document is a terminal buffer (a running child
+    /// process's PTY output kept live-synced into a `Document`, with no
+    /// backing file) rather than a normal buffer that merely happens to
+    /// have no path yet, like a genuinely empty scratch buffer. Two things
+    /// key off this:
+    ///
+    /// - Every view showing the document always renders (and places the
+    ///   cursor, and maps mouse coordinates) as if scrolled to
+    ///   `ViewPosition::default()`, ignoring whatever offset is actually
+    ///   stored for that view. A terminal buffer's content is always
+    ///   exactly the size of the viewport rather than scrollable text - a
+    ///   stored offset only exists because it's incidentally the same
+    ///   storage normal buffers use, and would otherwise drift out from
+    ///   under a background-refreshing terminal buffer (see
+    ///   `Document::apply`'s anchor remapping) with no per-keystroke
+    ///   correction to pull it back, since terminal buffers also skip
+    ///   `ensure_cursor_in_view`.
+    /// - `Editor::switch`'s "delete an empty scratch buffer when navigating
+    ///   away from it" cleanup does not apply. That heuristic identifies a
+    ///   scratch buffer by `path().is_none()`, which a terminal buffer also
+    ///   satisfies despite being neither empty nor disposable - without
+    ///   this exemption, switching away from any terminal buffer that
+    ///   happens to be unmodified (which, unlike a real edit, it always is;
+    ///   see `discard_pending_changes`) silently deletes the `Document`
+    ///   out from under its still-running child process.
+    pub is_terminal_buffer: bool,
 
     pub previous_diagnostic_ids: HashMap<LanguageServerId, String>,
 
@@ -251,6 +283,12 @@ pub struct DocumentColorSwatches {
 /// Highlight ranges returned by LSP `textDocument/documentHighlight` for a view.
 #[derive(Debug, Clone, Default)]
 pub struct DocumentHighlights {
+    pub ranges: Vec<std::ops::Range<usize>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScriptHighlightGroup {
+    pub scope: String,
     pub ranges: Vec<std::ops::Range<usize>>,
 }
 
@@ -300,6 +338,13 @@ pub struct DocumentInlayHints {
     /// added first, then the regular inlay hints, then the `after` padding.
     pub padding_before_inlay_hints: Vec<InlineAnnotation>,
     pub padding_after_inlay_hints: Vec<InlineAnnotation>,
+
+    /// Inlay hints with an explicit theme scope, used by plugins for custom
+    /// per-hint coloring (e.g. crates.hx). Parallel to `scoped_inlay_hint_scopes`;
+    /// each scope name is resolved to a highlight at render time so the color
+    /// tracks theme changes.
+    pub scoped_inlay_hints: Vec<InlineAnnotation>,
+    pub scoped_inlay_hint_scopes: Vec<String>,
 }
 
 impl DocumentInlayHints {
@@ -312,6 +357,8 @@ impl DocumentInlayHints {
             other_inlay_hints: Vec::new(),
             padding_before_inlay_hints: Vec::new(),
             padding_after_inlay_hints: Vec::new(),
+            scoped_inlay_hints: Vec::new(),
+            scoped_inlay_hint_scopes: Vec::new(),
         }
     }
 }
@@ -769,9 +816,12 @@ impl Document {
             version_control_head: None,
             focused_at: std::time::Instant::now(),
             name: None,
+            bufferline_name: None,
             readonly: false,
+            is_terminal_buffer: false,
             jump_labels: HashMap::new(),
             document_highlights: HashMap::new(),
+            script_highlights: HashMap::new(),
             code_action_hints: HashSet::new(),
             color_swatches: None,
             document_links: Vec::new(),
@@ -1599,6 +1649,8 @@ impl Document {
                 other_inlay_hints,
                 padding_before_inlay_hints,
                 padding_after_inlay_hints,
+                scoped_inlay_hints,
+                scoped_inlay_hint_scopes: _,
             } = text_annotation;
 
             apply_inlay_hint_changes(padding_before_inlay_hints);
@@ -1606,6 +1658,7 @@ impl Document {
             apply_inlay_hint_changes(parameter_inlay_hints);
             apply_inlay_hint_changes(other_inlay_hints);
             apply_inlay_hint_changes(padding_after_inlay_hints);
+            apply_inlay_hint_changes(scoped_inlay_hints);
         }
 
         for highlights in self.document_highlights.values_mut() {
@@ -1628,6 +1681,28 @@ impl Document {
                 }
             }
             highlights.ranges = updated;
+        }
+
+        for group in self.script_highlights.values_mut() {
+            let text_len = self.text.len_chars();
+            let mut updated = Vec::with_capacity(group.ranges.len());
+            for mut range in group.ranges.drain(..) {
+                changes.update_positions(
+                    [
+                        (&mut range.start, Assoc::After),
+                        (&mut range.end, Assoc::After),
+                    ]
+                    .into_iter(),
+                );
+                if range.start >= text_len {
+                    continue;
+                }
+                let end = range.end.min(text_len);
+                if range.start < end {
+                    updated.push(range.start..end);
+                }
+            }
+            group.ranges = updated;
         }
 
         helix_event::dispatch(DocumentDidChange {
@@ -1851,6 +1926,18 @@ impl Document {
             current_revision
         );
         current_revision != self.last_saved_revision || !self.changes.is_empty()
+    }
+
+    /// Discards change-tracking accumulated since the last history commit,
+    /// without committing it to undo history or touching the saved-revision
+    /// counter. Unlike `append_changes_to_history`, this doesn't require
+    /// `old_state` to be set, so it's safe to call even when nothing has
+    /// been recorded yet. For a document that never calls
+    /// `append_changes_to_history` at all (a terminal buffer, whose content
+    /// changes every frame but was never "edited" in any sense a user would
+    /// want to undo), this is what keeps `is_modified` reporting `false`.
+    pub fn discard_pending_changes(&mut self) {
+        self.changes = ChangeSet::new(self.text().slice(..));
     }
 
     /// Save modifications to history, and so [`Self::is_modified`] will return false.
@@ -2121,6 +2208,9 @@ impl Document {
     }
 
     pub fn view_offset(&self, view_id: ViewId) -> ViewPosition {
+        if self.is_terminal_buffer {
+            return ViewPosition::default();
+        }
         self.view_data(view_id).view_position
     }
 
@@ -2472,6 +2562,33 @@ impl Document {
         self.document_highlights
             .get(&view_id)
             .map(|highlights| highlights.ranges.as_slice())
+    }
+
+    pub fn set_script_highlights(
+        &mut self,
+        namespace: String,
+        scope: String,
+        mut ranges: Vec<std::ops::Range<usize>>,
+    ) {
+        if ranges.is_empty() {
+            self.script_highlights.remove(&namespace);
+            return;
+        }
+        ranges.sort_unstable_by_key(|r| r.start);
+        self.script_highlights
+            .insert(namespace, ScriptHighlightGroup { scope, ranges });
+    }
+
+    pub fn clear_script_highlights(&mut self, namespace: &str) {
+        self.script_highlights.remove(namespace);
+    }
+
+    pub fn clear_all_script_highlights(&mut self) {
+        self.script_highlights.clear();
+    }
+
+    pub fn script_highlights(&self) -> &HashMap<String, ScriptHighlightGroup> {
+        &self.script_highlights
     }
 
     pub fn document_highlight_controller(&mut self, view_id: ViewId) -> &mut TaskController {
